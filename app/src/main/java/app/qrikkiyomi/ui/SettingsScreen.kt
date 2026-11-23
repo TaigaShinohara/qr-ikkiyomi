@@ -1,0 +1,176 @@
+package app.qrikkiyomi.ui
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+
+@Composable
+fun SettingsScreen(
+    autoSaveHistory: Boolean,
+    onToggleAutoSave: (Boolean) -> Unit,
+    vibrateOnDetect: Boolean,
+    onToggleVibrate: (Boolean) -> Unit,
+    autoDeleteDays: Int,
+    onSetAutoDeleteDays: (Int) -> Unit,
+    onExportBackup: () -> Unit,
+    onImportBackup: () -> Unit,
+    onDeleteAllHistory: () -> Unit,
+    entryCount: Int,
+) {
+    var confirmDelete by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val versionLabel = remember {
+        try {
+            val info = context.packageManager.getPackageInfo(context.packageName, 0)
+            "${info.versionName} (${info.longVersionCode})"
+        } catch (e: Exception) {
+            "0.4.0 (5)"
+        }
+    }
+
+    Column(
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+            .padding(horizontal = QrSpacing.gutter, vertical = QrSpacing.lg),
+    ) {
+        Text("設定", style = MaterialTheme.typography.headlineSmall)
+        Spacer(Modifier.height(20.dp))
+
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("履歴を自動保存", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    // R-2: saving happens for codes the user opened, not for
+                    // everything the camera happened to see.
+                    "タップして開いたコードを宝箱の履歴に残します（見えただけのコードは残りません）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = autoSaveHistory, onCheckedChange = onToggleAutoSave)
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("検出時に振動", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "新しいコードを見つけたときに1回だけ振動します",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = vibrateOnDetect, onCheckedChange = onToggleVibrate)
+        }
+
+        Spacer(Modifier.height(QrSpacing.section))
+        Text("データ", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "保存件数: $entryCount 件。データはこの端末の中だけに保存され、外に送られることはありません。",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Spacer(Modifier.height(12.dp))
+        // FR-LIB-02 / UX-13-3: prune old scan history at startup.
+        Text("古い履歴を自動削除", style = MaterialTheme.typography.bodyLarge)
+        Text(
+            // R2-11: favourites are exempt — the text says so, and the
+            // pruning code (pruneAgedScans) does so.
+            "読取履歴だけが対象で、作成したQRとお気に入りは消えません。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(0 to "しない", 30 to "30日", 90 to "90日", 180 to "180日").forEach { (days, label) ->
+                FilterChip(
+                    selected = autoDeleteDays == days,
+                    onClick = { onSetAutoDeleteDays(days) },
+                    label = { Text(label) },
+                )
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+        // FR-EXPORT-04 / UX-13-4: backup out/in as a JSON file, chosen by
+        // the user through the system file picker. Nothing leaves the
+        // device unless the user picks a destination themselves.
+        Text("バックアップ", style = MaterialTheme.typography.bodyLarge)
+        Text(
+            "宝箱の中身をJSONファイルに書き出します。読み込むと、今の宝箱はバックアップの内容に置き換わります。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+        // v0.3.0 design pass: action buttons are full-width and stacked, so
+        // a long label can never be crushed into a narrow column (the old
+        // side-by-side Row wrapped 読み込む into three lines / an oval).
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SecondaryActionButton(
+                "バックアップを書き出す",
+                onClick = onExportBackup,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            SecondaryActionButton(
+                "バックアップから読み込む",
+                onClick = onImportBackup,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            SecondaryActionButton(
+                "履歴をすべて削除",
+                onClick = { confirmDelete = true },
+                modifier = Modifier.fillMaxWidth(),
+                danger = true,
+            )
+        }
+
+        Spacer(Modifier.height(QrSpacing.section))
+        Text("このアプリについて", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "QRいっき読み バージョン $versionLabel\n" +
+                "アカウントなし・広告なし・通信なし（アプリ自体にインターネット権限がありません）。\n" +
+                "外部のサイトやアプリを開くときだけ、選んだアプリに内容を渡します。\n" +
+                "アンインストールすると、保存したデータはすべて消えます。",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Spacer(Modifier.height(32.dp))
+    }
+
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("履歴をすべて削除しますか") },
+            text = { Text("読み取り履歴をすべて削除します。作成したQRは残ります。元に戻せません。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    onDeleteAllHistory()
+                    confirmDelete = false
+                }) { Text("削除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) { Text("やめる") }
+            },
+        )
+    }
+}

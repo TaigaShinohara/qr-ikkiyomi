@@ -1,0 +1,28 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!--
+      QRいっき読み app icon (ART_DIRECTION v1.1): a quiet, correct QR mark —
+      three finder patterns in true QR proportions (7 : 4.5 : 2.5) plus a few
+      data modules, white on the deep-navy token colour. No decoration, no
+      letters: at launcher size it must read as "QR" in under a second.
+      All marks stay inside the adaptive-icon safe zone (26..82).
+    -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M30,26h14a4,4 0 0 1 4,4v14a4,4 0 0 1 -4,4h-14a4,4 0 0 1 -4,-4v-14a4,4 0 0 1 4,-4zM30,30h14v14h-14zM33,33h8v8h-8z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M64,26h14a4,4 0 0 1 4,4v14a4,4 0 0 1 -4,4h-14a4,4 0 0 1 -4,-4v-14a4,4 0 0 1 4,-4zM64,30h14v14h-14zM67,33h8v8h-8z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M30,60h14a4,4 0 0 1 4,4v14a4,4 0 0 1 -4,4h-14a4,4 0 0 1 -4,-4v-14a4,4 0 0 1 4,-4zM30,64h14v14h-14zM33,67h8v8h-8z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,34h6v6h-6zM66,54h6v6h-6zM54,62h6v6h-6zM74,60h6v6h-6zM62,74h6v6h-6zM76,76h6v6h-6z" />
+</vector>

@@ -1,0 +1,13 @@
+# 署名鍵・パスワード・ローカル作業物（絶対に公開しない）
+.local/
+local.properties
+*.jks
+*.keystore
+keystore-password.txt
+
+# ビルド生成物
+.gradle/
+.kotlin/
+**/build/
+*.apk
+*.aab
