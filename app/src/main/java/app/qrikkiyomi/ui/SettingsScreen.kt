@@ -48,7 +48,7 @@ fun SettingsScreen(
             val info = context.packageManager.getPackageInfo(context.packageName, 0)
             "${info.versionName} (${info.longVersionCode})"
         } catch (e: Exception) {
-            "0.4.2 (7)"
+            "0.4.3 (8)"
         }
     }
 
@@ -56,9 +56,10 @@ fun SettingsScreen(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
             .padding(horizontal = QrSpacing.gutter, vertical = QrSpacing.lg),
     ) {
-        Text("設定", style = MaterialTheme.typography.headlineSmall)
-        Spacer(Modifier.height(20.dp))
-
+        // v0.4.3 (MINIMAL N-12): no "設定" headline — the selected
+        // bottom-nav tab already says it; the headline was a re-display.
+        // v0.4.3 (MINIMAL N-13): toggle descriptions keep only the part
+        // the label does not already say.
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
                 Text("スキャンしたら自動で履歴に保存", style = MaterialTheme.typography.bodyLarge)
@@ -66,7 +67,8 @@ fun SettingsScreen(
                     // v0.4.2 (FR-SCAN-07 revised): the user asked for this
                     // after real-device testing — finding a code is enough
                     // for it to land in history, once per appearance.
-                    "見つけたコードを、その場で宝箱の履歴に残します（同じコードが映り続けても保存は1回だけです）",
+                    // The description keeps only that guarantee.
+                    "同じコードが映り続けても、保存は1回だけです",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -79,7 +81,7 @@ fun SettingsScreen(
             Column(modifier = Modifier.weight(1f)) {
                 Text("開いたコードを履歴に保存", style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    "上の自動保存がオフのとき、タップして開いたコードを宝箱の履歴に残します",
+                    "上の自動保存がオフのときだけ働きます",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -90,12 +92,8 @@ fun SettingsScreen(
         Spacer(Modifier.height(16.dp))
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
+                // No description: the label is the whole fact.
                 Text("検出時に振動", style = MaterialTheme.typography.bodyLarge)
-                Text(
-                    "新しいコードを見つけたときに1回だけ振動します",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
             Switch(checked = vibrateOnDetect, onCheckedChange = onToggleVibrate)
         }
@@ -104,7 +102,10 @@ fun SettingsScreen(
         Text("データ", style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(8.dp))
         Text(
-            "保存件数: $entryCount 件。データはこの端末の中だけに保存され、外に送られることはありません。",
+            // v0.4.3 (MINIMAL N-14): the privacy sentence lived here AND
+            // in "このアプリについて" below; the about section is the
+            // canonical home, so this line keeps only the count.
+            "保存件数: $entryCount 件",
             style = MaterialTheme.typography.bodyMedium,
         )
         Spacer(Modifier.height(12.dp))
@@ -133,7 +134,10 @@ fun SettingsScreen(
         // device unless the user picks a destination themselves.
         Text("バックアップ", style = MaterialTheme.typography.bodyLarge)
         Text(
-            "宝箱の中身をJSONファイルに書き出します。読み込むと、今の宝箱はバックアップの内容に置き換わります。",
+            // v0.4.3 (MINIMAL N-15): the buttons below already say what
+            // they do (書き出す／読み込む); the description keeps only
+            // the warning that is not on any button.
+            "読み込むと、今の宝箱はバックアップの内容に置き換わります。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

@@ -366,9 +366,11 @@ fun CreateScreen(
 
             if (type == CreateType.GEO) {
                 // D-4 hint: coordinates can arrive by sharing, not only typing.
+                // v0.4.3 (MINIMAL N-9): one sentence only — the second
+                // sentence (Google Maps URLs belong to the URL type) was
+                // about a different form and read as noise here.
                 Text(
-                    "ヒント：地図アプリで場所を共有→このアプリを選ぶと、緯度経度が自動で入ります。" +
-                        "GoogleマップのURLは URL 種別でもそのままQRにできます。",
+                    "ヒント：地図アプリで場所を共有→このアプリを選ぶと、緯度経度が自動で入ります。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp),
@@ -429,11 +431,9 @@ fun CreateScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Text(
-                        "普段は変えなくて大丈夫です。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    // v0.4.3 (MINIMAL N-8): the reassurance line ("普段は
+                    // 変えなくて大丈夫です") is gone — a closed fold
+                    // already says exactly that.
                 }
                 Icon(
                     imageVector = if (state.showDetails) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
@@ -555,13 +555,11 @@ fun CreateScreen(
                         modifier = Modifier.weight(1f),
                     )
                 }
-            } else if (fieldErrors.isNotEmpty()) {
-                Text(
-                    "入力に問題があります：" + fieldErrors.values.first(),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            } else {
+            } else if (fieldErrors.isEmpty()) {
+                // v0.4.3 (MINIMAL N-7): no bottom error summary — each
+                // error already sits under its own field; repeating the
+                // first one down here was a re-display. With errors, the
+                // bottom stays empty and the fields speak for themselves.
                 EmptyGuide("必須の項目（*）を入れるとQRが出ます")
             }
             Spacer(Modifier.height(32.dp))

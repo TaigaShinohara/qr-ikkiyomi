@@ -117,7 +117,9 @@ class ScreenScreenshotTest {
         val state = ScanState().apply {
             imageMode = true
             imageBitmap = bitmap
-            fromImageNote = "画像から 2 件見つけました"
+            // v0.4.3 (MINIMAL N-1): the real flow no longer sets a
+            // success note for image scans — the list heading announces
+            // the count — so the fixture does not set one either.
             detections.addAll(
                 listOf(
                     DetectedCode(

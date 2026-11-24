@@ -129,7 +129,9 @@ fun ResultContent(
 
         if (kind == CodeKind.URL && urlInfo != null) {
             // FR-SAFE-01: the host is the headline, shown before any open action.
-            Text("開く前に確認", style = MaterialTheme.typography.labelLarge)
+            // v0.4.3 (MINIMAL N-4): no "開く前に確認" label above it — the
+            // sheet itself is the confirmation step; the label only
+            // restated the headline's job.
             Text(
                 urlInfo.host,
                 style = MaterialTheme.typography.headlineSmall,
@@ -155,12 +157,16 @@ fun ResultContent(
         if (kind == CodeKind.WIFI && wifi != null) {
             Spacer(Modifier.height(6.dp))
             // FR-SAFE-03: SSID and encryption are shown before connecting.
-            Text("ネットワーク: ${wifi.ssid}／暗号化: ${wifi.encryption.ifEmpty { "なし" }}")
+            // v0.4.3 (MINIMAL N-6): the SSID is already the headline
+            // ("Wi-Fi: <ssid>"), so this line carries only the encryption;
+            // the pair is still fully visible in the sheet.
+            Text("暗号化: ${wifi.encryption.ifEmpty { "なし" }}")
             // R2-12: the connect action is a suggestion to the OS, not a
-            // connection this app makes itself; say so before the tap,
-            // in the same place the SSID is confirmed.
+            // connection this app makes itself; say so before the tap.
+            // v0.4.3 (MINIMAL N-6): trimmed to the two facts — a request
+            // is sent, the system's approval is what connects.
             Text(
-                "押すと、この端末に接続リクエストを送ります。システムの通知またはダイアログで承認すると接続されます（このアプリが直接つなぐわけではありません）。",
+                "このボタンは端末へ接続リクエストを送るだけです。システムの通知またはダイアログで承認すると接続されます。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -206,12 +212,20 @@ fun ResultContent(
             }
         }
 
-        Spacer(Modifier.height(10.dp))
-        Text(
-            if (showRaw) rawValue else displayRaw,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        // v0.4.3 (MINIMAL N-5): when the raw block would print exactly
+        // what the headline already says (a short single-line text, a
+        // bare host…), it is a re-display and is dropped. When it adds
+        // anything — more lines, a URL path, the masked Wi-Fi form, or
+        // the explicitly revealed raw value — it stays.
+        val rawText = if (showRaw) rawValue else displayRaw
+        if (rawText.trim() != summary.trim()) {
+            Spacer(Modifier.height(10.dp))
+            Text(
+                rawText,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         if (alreadySaved) {
             Spacer(Modifier.height(6.dp))
             Text(

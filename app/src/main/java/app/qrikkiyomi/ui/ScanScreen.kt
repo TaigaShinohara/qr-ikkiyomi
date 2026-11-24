@@ -327,8 +327,11 @@ fun ScanScreen(
             detections.addAll(list)
             state.missCounts.clear()
             state.openedRaw = null
-            state.fromImageNote = if (list.isEmpty()) "画像の中にコードは見つかりませんでした"
-            else "画像から ${list.size} 件見つけました"
+            // v0.4.3 (MINIMAL N-1): no success note — the result list's
+            // heading already announces the count, and saying it twice
+            // was a re-display. Notes remain for the empty case, where
+            // the note is the only signal.
+            state.fromImageNote = if (list.isEmpty()) "画像の中にコードは見つかりませんでした" else null
             // A fresh image is a fresh appearance for everything in it.
             state.appearanceTracker.reset()
             autoSaveAppeared(list)
@@ -852,7 +855,10 @@ fun ScanScreen(
         }
 
         // Result list: number + kind + preview; tap opens the result sheet.
-        if (detections.isEmpty()) {
+        // v0.4.3 (MINIMAL N-2): in image mode the empty-state line ("aim
+        // at a code…") describes the wrong scene — the image note above
+        // already carries the state there, so the line is camera-only.
+        if (detections.isEmpty() && !imageModeActive) {
             Text(
                 "コードにかざすと、見つけたものがここに並びます",
                 style = MaterialTheme.typography.bodyMedium,
@@ -875,7 +881,13 @@ fun ScanScreen(
                     modifier = Modifier.weight(1f)
                         .semantics { liveRegion = LiveRegionMode.Polite },
                 )
-                TextButton(onClick = { saveAllDetected() }) { Text("全部を履歴に保存") }
+                // v0.4.3 (MINIMAL N-3): with auto-save-on-detect on,
+                // every code here is already in history, so the button
+                // could only ever report "all saved" — it is shown only
+                // when it is a real save path (auto-save off).
+                if (!autoSaveOnDetect) {
+                    TextButton(onClick = { saveAllDetected() }) { Text("全部を履歴に保存") }
+                }
             }
             // P2-2: height follows the count (up to a cap) instead of a
             // fixed two-row window, so a full sweep can be eyeballed.

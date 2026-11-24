@@ -368,7 +368,10 @@ class MainActivity : ComponentActivity() {
                         onDismissRequest = { pendingDraft = null },
                         title = { Text("入力中の内容があります") },
                         text = {
-                            Text("作る画面に入力中の内容があります。新しい内容で置き換えますか？（置き換えると、入力中の内容は消えます）")
+                            // v0.4.3 (MINIMAL N-16): the title already says
+                            // there is input in progress; the body keeps
+                            // only the question and the consequence.
+                            Text("新しい内容で置き換えますか？入力中の内容は消えます。")
                         },
                         confirmButton = {
                             TextButton(onClick = {

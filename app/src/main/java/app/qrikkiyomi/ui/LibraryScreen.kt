@@ -43,8 +43,9 @@ private fun MemoEditor(entry: Entry, onSave: (String) -> Unit) {
     val context = LocalContext.current
     var text by remember(entry.id, entry.memo) { mutableStateOf(entry.memo) }
     Column(modifier = Modifier.fillMaxWidth()) {
-        Text("メモ", style = MaterialTheme.typography.labelLarge)
-        Spacer(Modifier.height(6.dp))
+        // v0.4.3 (MINIMAL N-11): no standalone "メモ" heading — the
+        // field's own label ("メモ（検索で引けます）") says it, with the
+        // one extra fact that matters.
         OutlinedTextField(
             value = text,
             onValueChange = { text = it },
@@ -116,7 +117,11 @@ fun LibraryScreen(
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
-            label = { Text("検索（内容・種類・メモ・フォルダ）") },
+            // v0.4.3 (MINIMAL N-10): the label is just "検索" — listing
+            // the searchable fields in the label was a sentence doing a
+            // word's job. Search still covers content, kind, memo and
+            // folder, all of which are visible on the rows themselves.
+            label = { Text("検索") },
             leadingIcon = {
                 androidx.compose.material3.Icon(
                     Icons.Filled.Search,
