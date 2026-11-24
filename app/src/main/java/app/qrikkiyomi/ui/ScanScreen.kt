@@ -971,6 +971,8 @@ fun ScanScreen(
                 rawValue = state.selected!!.rawValue,
                 formatName = state.selected!!.formatName,
                 alreadySaved = state.selectedAlreadySaved,
+                // v0.4.4 (MINIMAL J-1): the sheet's raw block starts folded.
+                collapseRawByDefault = true,
                 onMakeQrFromText = { text ->
                     state.selected = null
                     onMakeQrFromText(text)

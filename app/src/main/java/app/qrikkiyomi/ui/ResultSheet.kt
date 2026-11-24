@@ -30,6 +30,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.qrikkiyomi.core.CodeClassifier
@@ -67,6 +69,12 @@ fun ResultContent(
     // sheet was opened, so "already saved" can be said out loud instead
     // of the save silently doing nothing.
     alreadySaved: Boolean = false,
+    // v0.4.4 (MINIMAL J-1, decided by the user 2026-11-24): in the scan
+    // result sheet the raw block starts folded for every kind, replacing
+    // the v0.4.3 "hide only when identical to the headline" rule. The
+    // library detail screen passes false and keeps the v0.4.3 behaviour
+    // (it is the place users come back to re-read a code, R2-11).
+    collapseRawByDefault: Boolean = false,
 ) {
     val context = LocalContext.current
     val kind = remember(rawValue) { CodeClassifier.classify(rawValue) }
@@ -82,6 +90,8 @@ fun ResultContent(
     // every action below keeps using internally.
     val displayRaw = remember(rawValue) { CodeClassifier.maskedForDisplay(rawValue) }
     val isMasked = displayRaw != rawValue
+    // v0.4.4: with collapseRawByDefault this is also the raw block's
+    // fold state (false = folded, nothing of the block on screen).
     var showRaw by remember(rawValue) { androidx.compose.runtime.mutableStateOf(false) }
     // R2-8: event times are parsed once, up front, so the sheet can show
     // them readably and refuse to invent a start time when there is none.
@@ -212,19 +222,36 @@ fun ResultContent(
             }
         }
 
-        // v0.4.3 (MINIMAL N-5): when the raw block would print exactly
-        // what the headline already says (a short single-line text, a
-        // bare host…), it is a re-display and is dropped. When it adds
-        // anything — more lines, a URL path, the masked Wi-Fi form, or
-        // the explicitly revealed raw value — it stays.
-        val rawText = if (showRaw) rawValue else displayRaw
-        if (rawText.trim() != summary.trim()) {
-            Spacer(Modifier.height(10.dp))
-            Text(
-                rawText,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        if (collapseRawByDefault) {
+            // v0.4.4 (MINIMAL J-1): folded for every kind, whatever the
+            // payload — nothing of the raw block is on screen until the
+            // "生データを表示" button below is tapped. Expanded, it
+            // shows the full raw value, so for Wi-Fi the same tap is
+            // also the R2-3 unmask; masked-by-default still holds
+            // because the folded state shows nothing at all.
+            if (showRaw) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    rawValue,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else {
+            // v0.4.3 (MINIMAL N-5): when the raw block would print exactly
+            // what the headline already says (a short single-line text, a
+            // bare host…), it is a re-display and is dropped. When it adds
+            // anything — more lines, a URL path, the masked Wi-Fi form, or
+            // the explicitly revealed raw value — it stays.
+            val rawText = if (showRaw) rawValue else displayRaw
+            if (rawText.trim() != summary.trim()) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    rawText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
         if (alreadySaved) {
             Spacer(Modifier.height(6.dp))
@@ -358,10 +385,22 @@ fun ResultContent(
             }
             // R2-3: the raw payload is masked by default (Wi-Fi password);
             // revealing it is an explicit act, and hiding it again is too.
-            if (isMasked) {
+            // v0.4.4 (J-1): in the result sheet this button exists for
+            // every kind — it is the fold/unfold control for the raw
+            // block — and carries the fold state for screen readers;
+            // the copy/share actions above work the same folded or not.
+            if (collapseRawByDefault || isMasked) {
                 SecondaryActionButton(
                     if (showRaw) "生データを隠す" else "生データを表示",
                     onClick = { showRaw = !showRaw },
+                    modifier = if (collapseRawByDefault) {
+                        Modifier.semantics {
+                            stateDescription =
+                                if (showRaw) "生データは表示中" else "生データは折りたたみ中"
+                        }
+                    } else {
+                        Modifier
+                    },
                 )
             }
             // UX-13-7: "QRで再共有" is a spec section 6 auxiliary action for

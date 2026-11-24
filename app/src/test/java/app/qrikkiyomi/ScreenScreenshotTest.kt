@@ -232,7 +232,11 @@ class ScreenScreenshotTest {
         }
     }
 
-    /** Result sheet content for a shortened URL: host first, warning shown. */
+    /**
+     * Result sheet content for a shortened URL: host first, warning
+     * shown. v0.4.4 (J-1): rendered as the scan sheet renders it —
+     * raw block folded, only the "生データを表示" button is present.
+     */
     @Test
     fun resultSheet_shortUrl() {
         shot("result_short_url.png") {
@@ -240,6 +244,7 @@ class ScreenScreenshotTest {
                 rawValue = "https://bit.ly/3AbCdEf",
                 formatName = "QR_CODE",
                 onMakeQrFromText = {},
+                collapseRawByDefault = true,
             )
         }
     }
