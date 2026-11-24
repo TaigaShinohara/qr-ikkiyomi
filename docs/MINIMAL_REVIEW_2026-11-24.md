@@ -210,4 +210,4 @@
 - 署名：apksigner verify 合格。証明書 SHA-256 `76a232cb…` ＝ v0.4.x と同一鍵のため**上書きインストール可**。
 - aapt：versionCode 8／versionName 0.4.3。権限は CAMERA／VIBRATE／Wi-Fi 状態系のみで **INTERNET 権限なし**。
 - APK：`~/workspace/your_files/QRikkiyomi-v0-4-3.apk`（34,948,512 bytes ≒ 33.3MiB、release ビルド）。
-- GitHub push：コミット ID は push 後に本節へ追記する。
+- GitHub push：コミット **9772579** を main へ push 済み（鍵・.local・APK は含まない）。
