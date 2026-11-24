@@ -15,6 +15,7 @@ import android.os.Vibrator
 import android.os.VibratorManager
 import android.provider.Settings
 import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -101,6 +102,7 @@ import app.qrikkiyomi.core.CodeClassifier
 import app.qrikkiyomi.core.CodeKind
 import app.qrikkiyomi.core.Entry
 import app.qrikkiyomi.core.Origin
+import app.qrikkiyomi.core.ZoomControl
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
@@ -142,6 +144,12 @@ class ScanState {
     var selectedAlreadySaved by mutableStateOf(false)
     var torchOn by mutableStateOf(false)
     var zoom by mutableStateOf(1f)
+    /** v0.4.5: the bound camera's real zoom range, adopted from its
+     * zoomState at bind time; the defaults apply until then (and on
+     * cameras that never report one). All three zoom controls —
+     * preset chips, pinch, slider — clamp to this range. */
+    var zoomMin by mutableStateOf(ZoomControl.DEFAULT_MIN)
+    var zoomMax by mutableStateOf(ZoomControl.DEFAULT_MAX)
     var fromImageNote by mutableStateOf<String?>(null)
     /** R2-1: while true, the still image (not the live camera) is shown
      * and its results are never overwritten by camera analysis. */
@@ -298,6 +306,18 @@ fun ScanScreen(
         formatName = d.formatName,
         kind = d.kind,
     )
+
+    // v0.4.5: the one door every zoom control goes through — clamp to
+    // the camera's range, publish to state (so the slider, the chips'
+    // selected state and the next pinch all see it at once), then push
+    // to the camera. The pinch handler inside the PreviewView factory
+    // cannot call this (it is bound to the composition that created
+    // the view), so it performs the same two steps inline there.
+    fun applyZoom(ratio: Float) {
+        val clamped = ZoomControl.clamp(ratio, state.zoomMin, state.zoomMax)
+        state.zoom = clamped
+        camera?.cameraControl?.setZoomRatio(clamped)
+    }
 
     // v0.4.2 (FR-SCAN-07 revised): with auto-save-on-detect on, a code is
     // written to history the moment it appears in the detection set —
@@ -588,6 +608,25 @@ fun ScanScreen(
                                             if (state.zoom != 1f) {
                                                 camera?.cameraControl?.setZoomRatio(state.zoom)
                                             }
+                                            // v0.4.5: adopt this camera's real
+                                            // zoom range, so the presets,
+                                            // pinch and slider all clamp to
+                                            // what the hardware can do (a
+                                            // range that reads as broken is
+                                            // ignored, keeping the defaults).
+                                            camera?.cameraInfo?.zoomState?.value?.let { zs ->
+                                                if (zs.maxZoomRatio > zs.minZoomRatio) {
+                                                    state.zoomMin = zs.minZoomRatio
+                                                    state.zoomMax = zs.maxZoomRatio
+                                                    val clamped = ZoomControl.clamp(
+                                                        state.zoom, state.zoomMin, state.zoomMax,
+                                                    )
+                                                    if (clamped != state.zoom) {
+                                                        state.zoom = clamped
+                                                        camera?.cameraControl?.setZoomRatio(clamped)
+                                                    }
+                                                }
+                                            }
                                             cameraBound = true
                                             cameraFailed = false
                                         } catch (e: Exception) {
@@ -598,15 +637,56 @@ fun ScanScreen(
                                         }
                                     }
                                 }, ContextCompat.getMainExecutor(ctx))
-                                setOnTouchListener { v, event ->
-                                    if (event.action == MotionEvent.ACTION_UP) {
-                                        val cam = camera
-                                        if (cam != null) {
-                                            val point = meteringPointFactory.createPoint(event.x, event.y)
-                                            val action = FocusMeteringAction.Builder(point).build()
-                                            cam.cameraControl.startFocusAndMetering(action)
+                                // v0.4.5: pinch zoom on the preview. The
+                                // detector and the tap-to-focus share this
+                                // one listener; any touch sequence that
+                                // involved a second finger (or an actual
+                                // scale) is marked, and its final ACTION_UP
+                                // must not fall through to focusing.
+                                var pinchZoom = state.zoom
+                                var sawMultiTouch = false
+                                val scaleDetector = ScaleGestureDetector(
+                                    ctx,
+                                    object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                                        override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
+                                            pinchZoom = state.zoom
+                                            sawMultiTouch = true
+                                            return true
                                         }
-                                        v.performClick()
+
+                                        override fun onScale(detector: ScaleGestureDetector): Boolean {
+                                            // Same two steps as applyZoom in
+                                            // the composable (clamp → state →
+                                            // camera), inlined: this listener
+                                            // is bound to the composition that
+                                            // created the view.
+                                            pinchZoom = ZoomControl.scaled(
+                                                pinchZoom, detector.scaleFactor,
+                                                state.zoomMin, state.zoomMax,
+                                            )
+                                            state.zoom = pinchZoom
+                                            camera?.cameraControl?.setZoomRatio(pinchZoom)
+                                            return true
+                                        }
+                                    },
+                                )
+                                setOnTouchListener { v, event ->
+                                    scaleDetector.onTouchEvent(event)
+                                    when (event.actionMasked) {
+                                        MotionEvent.ACTION_POINTER_DOWN -> sawMultiTouch = true
+                                        MotionEvent.ACTION_UP -> {
+                                            if (!sawMultiTouch && !scaleDetector.isInProgress) {
+                                                val cam = camera
+                                                if (cam != null) {
+                                                    val point = meteringPointFactory.createPoint(event.x, event.y)
+                                                    val action = FocusMeteringAction.Builder(point).build()
+                                                    cam.cameraControl.startFocusAndMetering(action)
+                                                }
+                                                v.performClick()
+                                            }
+                                            sawMultiTouch = false
+                                        }
+                                        MotionEvent.ACTION_CANCEL -> sawMultiTouch = false
                                     }
                                     true
                                 }
@@ -661,6 +741,52 @@ fun ScanScreen(
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.onSurface,
                         )
+                    }
+                }
+
+                // v0.4.5: preset zoom chips along the preview's lower
+                // edge — one tap to a fixed ratio. The selected chip is
+                // the only place the current ratio is spelled out (the
+                // slider's thumb position says the same thing in shape);
+                // no separate numeric readout is added. Shown only
+                // while a live camera is actually bound.
+                if (cameraBound && !cameraFailed) {
+                    Row(
+                        modifier = Modifier.align(Alignment.BottomCenter)
+                            .padding(bottom = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        ZoomControl.visiblePresets(state.zoomMin, state.zoomMax).forEach { preset ->
+                            val selected = ZoomControl.isSelected(state.zoom, preset)
+                            Box(
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (selected) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
+                                        }
+                                    )
+                                    .clickable(role = Role.Button) { applyZoom(preset) }
+                                    .semantics {
+                                        contentDescription = "ズーム ${ZoomControl.label(preset)}"
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 7.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    ZoomControl.label(preset),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (selected) {
+                                        MaterialTheme.colorScheme.onPrimary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurface
+                                    },
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -809,11 +935,12 @@ fun ScanScreen(
                         )
                         Slider(
                             value = state.zoom,
-                            onValueChange = {
-                                state.zoom = it
-                                camera?.cameraControl?.setZoomRatio(it)
-                            },
-                            valueRange = 1f..6f,
+                            // v0.4.5: the slider spans the bound
+                            // camera's real range and goes through
+                            // applyZoom, so chips and pinch follow it
+                            // (and it follows them) via state.zoom.
+                            onValueChange = { applyZoom(it) },
+                            valueRange = state.zoomMin..state.zoomMax,
                             enabled = cameraLive,
                             colors = SliderDefaults.colors(
                                 thumbColor = MaterialTheme.colorScheme.primary,
@@ -858,14 +985,12 @@ fun ScanScreen(
         // v0.4.3 (MINIMAL N-2): in image mode the empty-state line ("aim
         // at a code…") describes the wrong scene — the image note above
         // already carries the state there, so the line is camera-only.
-        if (detections.isEmpty() && !imageModeActive) {
-            Text(
-                "コードにかざすと、見つけたものがここに並びます",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-            )
-        } else {
+        // v0.4.5 (MINIMAL round 2, N2-1): the list block renders only
+        // when it has something in it. Image mode with zero hits used
+        // to fall into the list branch anyway and show a "0件見つけま
+        // した（タップで開く）" heading — nothing there to tap, and
+        // the toolbar note already carries that state.
+        if (detections.isNotEmpty()) {
           Column(modifier = if (wideList) Modifier.weight(3f) else Modifier) {
             // UX-6: the heading says how many and what a tap does.
             // R2-9: it is a live region, so TalkBack announces the count
@@ -962,7 +1087,16 @@ fun ScanScreen(
                 }
             }
           }
+        } else if (!imageModeActive) {
+            Text(
+                "コードにかざすと、見つけたものがここに並びます",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            )
         }
+        // Image mode with no detections renders nothing here: the note
+        // in the toolbar already says what happened (N2-1).
     }
 
     if (state.selected != null) {
