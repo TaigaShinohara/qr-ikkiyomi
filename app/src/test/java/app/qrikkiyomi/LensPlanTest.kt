@@ -128,7 +128,7 @@ class LensPlanTest {
     @Test
     fun visiblePresetsOnlyOfferWhatTheLensesCanReach() {
         assertEquals(
-            listOf(0.5f, 1f, 2f, 3f, 5f),
+            listOf(0.5f, 1f, 2f, 5f),
             LensPlan.visiblePresets(trio),
         )
         // No ultrawide: 0.5× could only ever land on 1×, so the chip
@@ -137,13 +137,18 @@ class LensPlanTest {
             PhysicalLens("wide", 24f, true),
             PhysicalLens("tele", 72f, false),
         )
-        assertEquals(listOf(1f, 2f, 3f, 5f), LensPlan.visiblePresets(noUw))
+        assertEquals(listOf(1f, 2f, 5f), LensPlan.visiblePresets(noUw))
         // Ultrawide + wide only: tele presets ride the wide lens.
         assertEquals(
-            listOf(0.5f, 1f, 2f, 3f, 5f),
+            listOf(0.5f, 1f, 2f, 5f),
             LensPlan.visiblePresets(listOf(uw, wide)),
         )
         // Nothing usable → no chips from the plan at all.
         assertEquals(emptyList<Float>(), LensPlan.visiblePresets(listOf(wide)))
+        // v0.4.7: the chips come from ZoomControl's candidate set,
+        // which no longer contains 3× (the stock camera's set is
+        // {0.5, 1, 2, 5}) — the plan must not resurrect it.
+        assertFalse(LensPlan.visiblePresets(trio).contains(3f))
+        assertFalse(LensPlan.visiblePresets(noUw).contains(3f))
     }
 }

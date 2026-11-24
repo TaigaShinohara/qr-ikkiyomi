@@ -52,7 +52,7 @@ class ZoomControlTest {
     @Test
     fun presetsForTheDefaultRange() {
         assertEquals(
-            listOf(1f, 2f, 3f, 5f),
+            listOf(1f, 2f, 5f),
             ZoomControl.visiblePresets(ZoomControl.DEFAULT_MIN, ZoomControl.DEFAULT_MAX),
         )
     }
@@ -60,21 +60,35 @@ class ZoomControlTest {
     @Test
     fun presetsIncludeHalfWhenTheCameraReachesIt() {
         assertEquals(
-            listOf(0.5f, 1f, 2f, 3f, 5f),
+            listOf(0.5f, 1f, 2f, 5f),
             ZoomControl.visiblePresets(0.5f, 10f),
         )
     }
 
     @Test
     fun presetsShrinkToANarrowRange() {
-        assertEquals(listOf(2f, 3f), ZoomControl.visiblePresets(2f, 4f))
+        assertEquals(listOf(2f), ZoomControl.visiblePresets(2f, 4f))
         assertEquals(listOf(1f), ZoomControl.visiblePresets(1f, 1.5f))
         // A camera whose minimum sits just above 0.5x does not get a
         // 0.5x chip it cannot honour.
         assertEquals(
-            listOf(1f, 2f, 3f, 5f),
+            listOf(1f, 2f, 5f),
             ZoomControl.visiblePresets(0.6f, 8f),
         )
+    }
+
+    @Test
+    fun presetsNeverOffer3x() {
+        // v0.4.7: the preset set is the stock camera's {0.5, 1, 2, 5}.
+        // v0.4.5–0.4.6 offered a 3× chip no stock camera shows; the
+        // user asked why it was there. Pin the set so 3× cannot
+        // return through either the candidates or any visible range.
+        assertEquals(
+            listOf(0.5f, 1f, 2f, 5f),
+            ZoomControl.PRESET_CANDIDATES,
+        )
+        assertFalse(ZoomControl.visiblePresets(0.5f, 30f).contains(3f))
+        assertFalse(ZoomControl.visiblePresets(2.5f, 3.5f).contains(3f))
     }
 
     @Test

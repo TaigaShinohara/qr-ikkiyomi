@@ -52,6 +52,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.FlashlightOff
 import androidx.compose.material.icons.filled.FlashlightOn
 import androidx.compose.material.icons.filled.PhotoLibrary
@@ -148,6 +149,12 @@ class ScanState {
     /** P2-5: whether [selected] was already in the library when opened. */
     var selectedAlreadySaved by mutableStateOf(false)
     var torchOn by mutableStateOf(false)
+    /** v0.4.7: which camera is bound — false = back (the startup
+     * default), true = front （インカメ）. Held here, alongside the
+     * detections, so leaving the tab and coming back — or a lens
+     * rebind — never silently flips back to the rear camera. An app
+     * restart starts on the back camera again (nothing persists it). */
+    var frontCamera by mutableStateOf(false)
     var zoom by mutableStateOf(1f)
     /** v0.4.5: the bound camera's real zoom range, adopted from its
      * zoomState at bind time; the defaults apply until then (and on
@@ -411,7 +418,13 @@ fun ScanScreen(
     // the base lens goes back to the logical camera — the app's
     // startup state — rather than binding the wide lens directly.
     fun applyPreset(preset: Float) {
-        val choice = LensPlan.choose(preset, state.lenses)
+        // v0.4.7: the lens plan is a back-camera affair. On the front
+        // camera a preset is a plain zoom inside its one lens.
+        val choice = if (state.frontCamera) {
+            null
+        } else {
+            LensPlan.choose(preset, state.lenses)
+        }
         val baseId = LensPlan.base(state.lenses)?.cameraId
         val currentKey = state.activeLensId ?: baseId
         if (choice == null || choice.lens.cameraId == currentKey) {
@@ -431,6 +444,32 @@ fun ScanScreen(
             state.torchAvailable = choice.lens.hasFlash
             if (!choice.lens.hasFlash) state.torchOn = false
         }
+        cameraBound = false
+        cameraFailed = false
+    }
+
+    // v0.4.7: back ⇄ front. Facing is a fresh start for the lens
+    // machinery: the front camera has no lens plan, and returning to
+    // the back starts from the logical camera (the startup state)
+    // rather than whatever physical lens was bound. Detections are
+    // dropped too — they belong to the scene the other camera was
+    // looking at, and their pins would sit at stale (and, across the
+    // front camera's mirror, flipped) positions until the miss
+    // counter aged them out. The rebind itself happens through the
+    // AndroidView key below, which includes the facing.
+    fun switchCamera() {
+        state.frontCamera = !state.frontCamera
+        state.activeLensId = null
+        state.activeLensRatio = 1f
+        state.zoom = 1f
+        state.torchOn = false
+        // The front camera has no flash unit; the bind below also
+        // derives this, but the toolbar reads the state immediately.
+        state.torchAvailable = !state.frontCamera
+        detections.clear()
+        state.missCounts.clear()
+        state.openedRaw = null
+        state.appearanceTracker.reset()
         cameraBound = false
         cameraFailed = false
     }
@@ -684,7 +723,10 @@ fun ScanScreen(
                 // preset that resolves to another physical lens
                 // recreates the view, and the factory below binds
                 // that lens instead (the retry key works the same).
-                key(cameraRetryKey, state.activeLensId) {
+                // v0.4.7: the facing is part of the key for the same
+                // reason — switching to the front camera recreates
+                // the view and binds DEFAULT_FRONT_CAMERA.
+                key(cameraRetryKey, state.activeLensId, state.frontCamera) {
                     AndroidView(
                         factory = { ctx ->
                             PreviewView(ctx).apply {
@@ -721,13 +763,24 @@ fun ScanScreen(
                                         }
                                         try {
                                             provider.unbindAll()
-                                            // v0.4.6: bind the physical
-                                            // lens a preset selected, or
-                                            // the logical camera (startup
-                                            // state / no lens plan).
-                                            val selector = state.activeLensId
-                                                ?.let { selectorForLens(it) }
-                                                ?: CameraSelector.DEFAULT_BACK_CAMERA
+                                            // v0.4.7: the front camera
+                                            // binds as itself — no lens
+                                            // plan, no physical-lens
+                                            // selector (switchCamera has
+                                            // already cleared both).
+                                            // v0.4.6: otherwise bind the
+                                            // physical lens a preset
+                                            // selected, or the logical
+                                            // camera (startup state /
+                                            // no lens plan).
+                                            val selector = when {
+                                                state.frontCamera ->
+                                                    CameraSelector.DEFAULT_FRONT_CAMERA
+                                                state.activeLensId != null ->
+                                                    selectorForLens(state.activeLensId!!)
+                                                else ->
+                                                    CameraSelector.DEFAULT_BACK_CAMERA
+                                            }
                                             camera = provider.bindToLifecycle(
                                                 lifecycleOwner,
                                                 selector,
@@ -776,10 +829,20 @@ fun ScanScreen(
                                             // state off honestly
                                             // instead of lighting
                                             // nothing.
-                                            state.torchAvailable = state.activeLensId?.let { id ->
-                                                state.lenses.firstOrNull { it.cameraId == id }
-                                                    ?.hasFlash ?: true
-                                            } ?: true
+                                            // v0.4.7: the front camera
+                                            // has no flash unit at all,
+                                            // so the torch is unavailable
+                                            // for the whole time it is
+                                            // bound — the same honest
+                                            // state as a flash-less lens.
+                                            state.torchAvailable = if (state.frontCamera) {
+                                                false
+                                            } else {
+                                                state.activeLensId?.let { id ->
+                                                    state.lenses.firstOrNull { it.cameraId == id }
+                                                        ?.hasFlash ?: true
+                                                } ?: true
+                                            }
                                             if (state.torchOn && state.torchAvailable) {
                                                 bound?.cameraControl?.enableTorch(true)
                                             } else if (!state.torchAvailable) {
@@ -865,6 +928,21 @@ fun ScanScreen(
                                             if (!sawMultiTouch && !scaleDetector.isInProgress) {
                                                 val cam = camera
                                                 if (cam != null) {
+                                                    // v0.4.7: meteringPointFactory
+                                                    // is PreviewView's own — it
+                                                    // inverts the very display
+                                                    // transform (rotation AND
+                                                    // the front camera's mirror)
+                                                    // that produced the tapped
+                                                    // pixels, so tap-to-focus
+                                                    // needs no facing adjustment
+                                                    // here. The detection pins
+                                                    // are different: they are
+                                                    // placed from raw analysis
+                                                    // coordinates by our own
+                                                    // maths, which flips X for
+                                                    // the front camera (see the
+                                                    // pin block in the composable).
                                                     val point = meteringPointFactory.createPoint(event.x, event.y)
                                                     val action = FocusMeteringAction.Builder(point).build()
                                                     cam.cameraControl.startFocusAndMetering(action)
@@ -895,7 +973,17 @@ fun ScanScreen(
                         val drawnH = d.frameH * scale
                         val offX = (viewSize.width - drawnW) / 2f
                         val offY = (viewSize.height - drawnH) / 2f
-                        val px = offX + d.centerX * scale
+                        // v0.4.7: PreviewView mirrors the front
+                        // camera's preview (it reads like a mirror),
+                        // but analysis frames arrive unmirrored — so
+                        // on the front camera the pin's X flips, or
+                        // every pin would sit on the mirror-opposite
+                        // side of its code. Y is unaffected.
+                        val px = if (state.frontCamera) {
+                            offX + drawnW - d.centerX * scale
+                        } else {
+                            offX + d.centerX * scale
+                        }
                         val py = offY + d.centerY * scale
                         val pinSizePx = with(density) { 44.dp.toPx() } // v0.4.6: pin touch box (DetectionPin)
                         DetectionPin(
@@ -943,7 +1031,12 @@ fun ScanScreen(
                 // stay visible while the tele lens is bound, or there
                 // is no way back), and a tap goes through applyPreset:
                 // a lens switch when the preset lives on another lens.
-                val presets = if (LensPlan.isUsable(state.lenses)) {
+                // v0.4.7: on the front camera there is no lens plan —
+                // the chips are whatever the front camera's own zoom
+                // range honestly contains (on most devices just 1×,
+                // and where the range is a single point the row
+                // simply does not appear).
+                val presets = if (!state.frontCamera && LensPlan.isUsable(state.lenses)) {
                     LensPlan.visiblePresets(state.lenses)
                 } else {
                     ZoomControl.visiblePresets(state.zoomMin, state.zoomMax)
@@ -1173,6 +1266,32 @@ fun ScanScreen(
                         }
                         Text(
                             "画像",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    // v0.4.7: back ⇄ front, in the toolbar's own
+                    // idiom (icon over a short label, same 52dp
+                    // column). Disabled under the same conditions as
+                    // the torch and zoom (cameraLive): no permission,
+                    // image mode, or a failed start — a switch offered
+                    // while no camera is live would be decorative.
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.width(52.dp),
+                    ) {
+                        IconButton(
+                            onClick = { switchCamera() },
+                            enabled = cameraLive,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Cameraswitch,
+                                contentDescription = "カメラ切替",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Text(
+                            "切替",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

@@ -19,8 +19,12 @@ object ZoomControl {
     const val DEFAULT_MAX = 6f
 
     /** Candidate preset ratios, ascending. Only those inside the
-     * camera's real range are offered (see [visiblePresets]). */
-    val PRESET_CANDIDATES: List<Float> = listOf(0.5f, 1f, 2f, 3f, 5f)
+     * camera's real range are offered (see [visiblePresets]).
+     * v0.4.7: the set is the stock camera's — 0.5／1／2／5. A 3×
+     * candidate rode along in v0.4.5–0.4.6 and surfaced as a chip
+     * no stock camera shows; the user called it out, and it is gone
+     * (pinned by ZoomControlTest so it cannot creep back). */
+    val PRESET_CANDIDATES: List<Float> = listOf(0.5f, 1f, 2f, 5f)
 
     /** A preset counts as inside the range even if the camera reports
      * its limit a hair inside the preset (float noise in zoomState). */
