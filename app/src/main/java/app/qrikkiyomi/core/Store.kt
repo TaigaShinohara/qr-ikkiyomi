@@ -162,6 +162,16 @@ class Store(context: Context) {
         get() = prefs.getBoolean("autoSaveHistory", true)
         set(v) { prefs.edit().putBoolean("autoSaveHistory", v).apply() }
 
+    /**
+     * v0.4.2 (FR-SCAN-07 revised): save a code to history the moment it is
+     * detected, not only when opened. Default on — the behaviour the user
+     * asked for after trying v0.4.1 on a real device. When off, saving
+     * falls back to the pre-0.4.2 rule (opened codes + "全部を履歴に保存").
+     */
+    var autoSaveOnDetect: Boolean
+        get() = prefs.getBoolean("autoSaveOnDetect", true)
+        set(v) { prefs.edit().putBoolean("autoSaveOnDetect", v).apply() }
+
     /** Vibrate once when the detection set grows (UX-2 / R-2). Default on. */
     var vibrateOnDetect: Boolean
         get() = prefs.getBoolean("vibrateOnDetect", true)

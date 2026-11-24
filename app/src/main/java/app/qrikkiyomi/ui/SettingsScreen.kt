@@ -28,6 +28,8 @@ import androidx.compose.ui.unit.dp
 
 @Composable
 fun SettingsScreen(
+    autoSaveOnDetect: Boolean,
+    onToggleAutoSaveOnDetect: (Boolean) -> Unit,
     autoSaveHistory: Boolean,
     onToggleAutoSave: (Boolean) -> Unit,
     vibrateOnDetect: Boolean,
@@ -46,7 +48,7 @@ fun SettingsScreen(
             val info = context.packageManager.getPackageInfo(context.packageName, 0)
             "${info.versionName} (${info.longVersionCode})"
         } catch (e: Exception) {
-            "0.4.0 (5)"
+            "0.4.2 (7)"
         }
     }
 
@@ -59,11 +61,25 @@ fun SettingsScreen(
 
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("履歴を自動保存", style = MaterialTheme.typography.bodyLarge)
+                Text("スキャンしたら自動で履歴に保存", style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    // R-2: saving happens for codes the user opened, not for
-                    // everything the camera happened to see.
-                    "タップして開いたコードを宝箱の履歴に残します（見えただけのコードは残りません）",
+                    // v0.4.2 (FR-SCAN-07 revised): the user asked for this
+                    // after real-device testing — finding a code is enough
+                    // for it to land in history, once per appearance.
+                    "見つけたコードを、その場で宝箱の履歴に残します（同じコードが映り続けても保存は1回だけです）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = autoSaveOnDetect, onCheckedChange = onToggleAutoSaveOnDetect)
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("開いたコードを履歴に保存", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "上の自動保存がオフのとき、タップして開いたコードを宝箱の履歴に残します",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

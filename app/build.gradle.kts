@@ -15,8 +15,8 @@ android {
         applicationId = "app.qrikkiyomi"
         minSdk = 26
         targetSdk = 36
-        versionCode = 6
-        versionName = "0.4.1"
+        versionCode = 7
+        versionName = "0.4.2"
     }
 
     // Signing (2026-11-15): the key lives in the project's persistent

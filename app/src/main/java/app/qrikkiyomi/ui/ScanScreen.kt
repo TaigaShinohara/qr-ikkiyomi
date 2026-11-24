@@ -96,6 +96,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import app.qrikkiyomi.core.AppearanceTracker
 import app.qrikkiyomi.core.CodeClassifier
 import app.qrikkiyomi.core.CodeKind
 import app.qrikkiyomi.core.Entry
@@ -148,6 +149,9 @@ class ScanState {
     var imageBitmap by mutableStateOf<Bitmap?>(null)
     /** P2-9: an image decode/scan is in flight. */
     var imageScanning by mutableStateOf(false)
+    /** v0.4.2: which raw values are currently "present", so auto-save
+     * on detection fires once per appearance, not per frame. */
+    val appearanceTracker = AppearanceTracker()
 }
 
 private fun formatNameOf(format: Int): String = when (format) {
@@ -230,6 +234,7 @@ fun ScanScreen(
     sharedImageUri: Uri?,
     onSharedImageConsumed: () -> Unit,
     autoSaveHistory: Boolean,
+    autoSaveOnDetect: Boolean,
     vibrateOnDetect: Boolean,
     multiHintDone: Boolean,
     onMultiHintDone: () -> Unit,
@@ -294,6 +299,19 @@ fun ScanScreen(
         kind = d.kind,
     )
 
+    // v0.4.2 (FR-SCAN-07 revised): with auto-save-on-detect on, a code is
+    // written to history the moment it appears in the detection set —
+    // once per appearance (AppearanceTracker), never per frame. The
+    // store layer still dedupes against existing history, so a code that
+    // leaves and returns does not produce a duplicate row, and a code
+    // saved this way reads as "保存済み" everywhere (P2-5).
+    fun autoSaveAppeared(current: List<DetectedCode>) {
+        if (!autoSaveOnDetect) return
+        val byRaw = current.associateBy { it.rawValue }
+        state.appearanceTracker.onDetections(current.map { it.rawValue })
+            .forEach { raw -> byRaw[raw]?.let { onScanned(entryOf(it)) } }
+    }
+
     fun handleDetected(list: List<DetectedCode>, fromImage: Boolean) {
         // R2-1: in image mode the still image's results are the state;
         // a live camera frame must never replace them.
@@ -311,6 +329,9 @@ fun ScanScreen(
             state.openedRaw = null
             state.fromImageNote = if (list.isEmpty()) "画像の中にコードは見つかりませんでした"
             else "画像から ${list.size} 件見つけました"
+            // A fresh image is a fresh appearance for everything in it.
+            state.appearanceTracker.reset()
+            autoSaveAppeared(list)
             return
         }
 
@@ -344,10 +365,14 @@ fun ScanScreen(
         }
         detections.clear()
         detections.addAll(merged)
+        // The tracker sees the merged set (including briefly-held codes),
+        // so a 1–2 frame flicker does not count as a new appearance.
+        autoSaveAppeared(merged)
     }
 
-    // R-2: history is written when the user actually opens a code (or uses
-    // "全部を履歴に保存"), not when the camera merely passes over it.
+    // R-2 (revised in v0.4.2): opening a code still saves it when the
+    // "開いたコードを履歴に保存" setting is on; with auto-save-on-detect
+    // on (the default) the code is normally in history already by then.
     fun openResult(d: DetectedCode) {
         // P2-5: capture "was already saved" before the auto-save below
         // makes the question meaningless.
@@ -379,6 +404,7 @@ fun ScanScreen(
         state.missCounts.clear()
         state.fromImageNote = null
         state.openedRaw = null
+        state.appearanceTracker.reset()
     }
 
     // D-5: the first-run hint also retires itself the moment a multi
@@ -452,9 +478,19 @@ fun ScanScreen(
 
     val imageModeActive = state.imageMode && state.imageBitmap != null
 
+    // v0.4.2: once codes are on screen in camera mode, the result list —
+    // not the preview — gets the larger share of the screen (preview
+    // ≈ 2 : list ≈ 3 of the flexible height), so a full sweep can be
+    // read at a glance. Pin mapping is unaffected: pins are positioned
+    // from the preview box's measured size (viewSize) either way.
+    // Image mode keeps the previous layout, as does the empty state.
+    val wideList = !imageModeActive && detections.isNotEmpty()
+
     Column(modifier = Modifier.fillMaxSize()) {
         Box(
-            modifier = Modifier.fillMaxWidth().weight(1f).background(Color.Black)
+            modifier = Modifier.fillMaxWidth()
+                .weight(if (wideList) 2f else 1f)
+                .background(Color.Black)
                 .onSizeChanged { viewSize = it },
         ) {
             if (imageModeActive) {
@@ -824,6 +860,7 @@ fun ScanScreen(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
             )
         } else {
+          Column(modifier = if (wideList) Modifier.weight(3f) else Modifier) {
             // UX-6: the heading says how many and what a tap does.
             // R2-9: it is a live region, so TalkBack announces the count
             // as it changes instead of leaving the user in silence.
@@ -842,7 +879,15 @@ fun ScanScreen(
             }
             // P2-2: height follows the count (up to a cap) instead of a
             // fixed two-row window, so a full sweep can be eyeballed.
-            LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 304.dp)) {
+            // v0.4.2: in wide-list mode the cap is gone — the list fills
+            // its share of the screen and scrolls within it.
+            LazyColumn(
+                modifier = if (wideList) {
+                    Modifier.fillMaxWidth().weight(1f)
+                } else {
+                    Modifier.fillMaxWidth().heightIn(max = 304.dp)
+                },
+            ) {
                 itemsIndexed(detections, key = { _, d -> d.rawValue }) { index, d ->
                     val summaryText = CodeClassifier.summary(d.rawValue, d.kind)
                     // R2-3 + P2-2: the preview line is the display-safe
@@ -904,6 +949,7 @@ fun ScanScreen(
                     }
                 }
             }
+          }
         }
     }
 

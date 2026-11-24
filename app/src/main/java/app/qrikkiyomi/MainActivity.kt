@@ -163,6 +163,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 var autoSave by remember { mutableStateOf(store.autoSaveHistory) }
+                var autoSaveOnDetect by remember { mutableStateOf(store.autoSaveOnDetect) }
                 var vibrate by remember { mutableStateOf(store.vibrateOnDetect) }
                 var autoDeleteDays by remember { mutableStateOf(store.autoDeleteDays) }
                 var multiHintDone by remember { mutableStateOf(store.multiHintDone) }
@@ -284,6 +285,7 @@ class MainActivity : ComponentActivity() {
                                 sharedImageUri = sharedImageUri,
                                 onSharedImageConsumed = { sharedImageUri = null },
                                 autoSaveHistory = autoSave,
+                                autoSaveOnDetect = autoSaveOnDetect,
                                 vibrateOnDetect = vibrate,
                                 multiHintDone = multiHintDone,
                                 onMultiHintDone = {
@@ -326,6 +328,11 @@ class MainActivity : ComponentActivity() {
                                 onGoScan = { tab = 0 },
                             )
                             else -> SettingsScreen(
+                                autoSaveOnDetect = autoSaveOnDetect,
+                                onToggleAutoSaveOnDetect = { v ->
+                                    autoSaveOnDetect = v
+                                    store.autoSaveOnDetect = v
+                                },
                                 autoSaveHistory = autoSave,
                                 onToggleAutoSave = { v ->
                                     autoSave = v

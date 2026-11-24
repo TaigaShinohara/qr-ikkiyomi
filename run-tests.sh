@@ -36,9 +36,15 @@ export GRADLE_USER_HOME=~/workspace/qr-matome/.local/gradle-home
 export GRADLE_OPTS="-Xmx768m -Dfile.encoding=UTF-8 -Djava.net.preferIPv4Stack=true"
 # Build serialization rule (AGENTS.md, 2026-11-23): at most 2 builds
 # at a time on this VM, via the global flock wrapper (2 slots).
+# NOTE (v0.4.2): :app:bundleDebugClassesToRuntimeJar must be in this
+# list explicitly. The unit-test runtime classpath points at that jar,
+# but nothing else in this invocation rebuilds it — without the task,
+# source changes silently test against a stale jar (this bit v0.4.2's
+# first run: NoClassDefFoundError for a brand-new class).
 ~/workspace/tools/with-build-lock.sh \
   ~/workspace/tools/gradle-8.9/bin/gradle --offline \
-  :app:assembleDebug :app:compileDebugUnitTestKotlin :app:writeTestRuntimeClasspath \
+  :app:assembleDebug :app:compileDebugUnitTestKotlin \
+  :app:bundleDebugClassesToRuntimeJar :app:writeTestRuntimeClasspath \
   -Dorg.gradle.daemon=false -Dkotlin.daemon.enabled=false --max-workers=1
 
 # Robolectric needs its android-all runtime jar. In this VM Java cannot

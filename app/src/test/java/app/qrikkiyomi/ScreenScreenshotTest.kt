@@ -85,6 +85,7 @@ class ScreenScreenshotTest {
             sharedImageUri = null,
             onSharedImageConsumed = {},
             autoSaveHistory = true,
+            autoSaveOnDetect = true,
             vibrateOnDetect = true,
             multiHintDone = false,
             onMultiHintDone = {},
@@ -213,6 +214,8 @@ class ScreenScreenshotTest {
     fun settings_defaults() {
         shot("settings.png") {
             SettingsScreen(
+                autoSaveOnDetect = true,
+                onToggleAutoSaveOnDetect = {},
                 autoSaveHistory = true,
                 onToggleAutoSave = {},
                 vibrateOnDetect = true,

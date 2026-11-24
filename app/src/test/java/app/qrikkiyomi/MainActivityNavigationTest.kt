@@ -55,7 +55,7 @@ class MainActivityNavigationTest {
     @Test
     fun settingsTab_opens() {
         rule.onNodeWithText("設定").performClick()
-        rule.onNodeWithText("履歴を自動保存").assertIsDisplayed()
+        rule.onNodeWithText("スキャンしたら自動で履歴に保存").assertIsDisplayed()
         rule.onNodeWithText("バックアップを書き出す").assertIsDisplayed()
     }
 }

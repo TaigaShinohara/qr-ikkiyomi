@@ -12,7 +12,7 @@ KVM が無くエミュレータは使えないので、画面は JVM 上で描�
 |---|---|---|
 | スクリーンショットテスト | Robolectric 4.14.1（GraphicsMode NATIVE）＋ Roborazzi 1.35.0 | 主要4画面＋結果シート（下表） |
 | 画面遷移・状態保持テスト | Robolectric ＋ Compose テスト（`MainActivityNavigationTest`） | 実 MainActivity のタブ遷移、作る画面の下書き保持（R2-6） |
-| 純粋ロジック単体テスト | JUnit 4（従来どおり） | CodeClassifier / QrFactory / Store の剪定（42件） |
+| 純粋ロジック単体テスト | JUnit 4（従来どおり） | CodeClassifier / QrFactory / Store の剪定 / AppearanceTracker（自動保存の出現単位重複防止、v0.4.2 で追加） |
 
 バージョンはこの VM のミラーが持つものに固定した
 （Robolectric 4.14.1 = SDK 35 の android-all、compose BOM 2024.12.01
@@ -107,6 +107,25 @@ golden は `app/src/test/screenshots/`。
   あわせて修飾子 `-night` でダーク配色に固定し golden を安定させる。
 
 ## 直近の実行結果
+
+2026-11-24 v0.4.2（自動保存オンデテクト＋結果リスト拡大）：
+
+- `./run-tests.sh record` → `./run-tests.sh`（verify）：**全59件合格**
+  （従来52件＋AppearanceTrackerTest 7件）。golden の差分は
+  `settings.png` のみ（新トグル「スキャンしたら自動で履歴に保存」の
+  追加と既存トグルの改名に伴う再記録、目視で崩れ・はみ出しなしを
+  確認）。`scan_permission.png`（検出ゼロ＝従来配分）と
+  `scan_image_mode.png`（画像モード＝配分変更の対象外）は無変更で
+  照合一致。カメラ＋検出ありの新配分（プレビュー：リスト＝2：3）は
+  ライブカメラ必須のため JVM では描けず未カバー（実機確認待ち）。
+- 注意：この回、初回の record で 11 件失敗した。原因はアプリではなく
+  テスト基盤側で、実行時クラスパスの `bundleDebugClassesToRuntimeJar`
+  の jar が再生成されず前日分のままだった（新規クラスが
+  NoClassDefFoundError）。run-tests.sh の Gradle タスク列に
+  `:app:bundleDebugClassesToRuntimeJar` を明示追加して解消済み。
+- リリースビルドは `lintVitalAnalyzeRelease` が SDK android-37.2 の
+  版文字列で落ちる既知の環境要因のため `-x lintVitalAnalyzeRelease`
+  で除外して成功（アプリ側の問題ではない）。
 
 2026-11-23 初回セットアップ（v0.4.0 のコードに対して実施）：
 
