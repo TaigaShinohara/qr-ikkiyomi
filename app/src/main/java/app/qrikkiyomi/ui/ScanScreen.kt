@@ -8,6 +8,8 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Rect
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
 import android.net.Uri
 import android.os.Build
 import android.os.VibrationEffect
@@ -19,6 +21,7 @@ import android.view.ScaleGestureDetector
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
@@ -101,7 +104,9 @@ import app.qrikkiyomi.core.AppearanceTracker
 import app.qrikkiyomi.core.CodeClassifier
 import app.qrikkiyomi.core.CodeKind
 import app.qrikkiyomi.core.Entry
+import app.qrikkiyomi.core.LensPlan
 import app.qrikkiyomi.core.Origin
+import app.qrikkiyomi.core.PhysicalLens
 import app.qrikkiyomi.core.ZoomControl
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
@@ -150,6 +155,28 @@ class ScanState {
      * preset chips, pinch, slider — clamp to this range. */
     var zoomMin by mutableStateOf(ZoomControl.DEFAULT_MIN)
     var zoomMax by mutableStateOf(ZoomControl.DEFAULT_MAX)
+    /** v0.4.6: the device's physical back lenses, enumerated once
+     * from CameraManager (empty = single-lens device, pre-28 API, or
+     * enumeration failed → the v0.4.5 logical-camera behaviour). */
+    var lenses: List<PhysicalLens> by mutableStateOf(emptyList())
+    var lensEnumDone: Boolean = false
+    /** v0.4.6: the physical lens currently bound, or null while the
+     * logical camera is bound. The logical camera's 1× position IS
+     * the base lens, so null doubles as "on the base lens". */
+    var activeLensId: String? by mutableStateOf(null)
+    /** v0.4.6: native ratio of the bound lens (base lens = 1×); 1
+     * while the logical camera is bound. [zoom] is always the
+     * EFFECTIVE ratio (lens ratio × the bound camera's own ratio). */
+    var activeLensRatio: Float = 1f
+    /** v0.4.6: the bound camera's own zoom range (its zoomState),
+     * before the lens ratio is applied. [zoomMin]/[zoomMax] remain
+     * the effective range = [activeLensRatio] × this range. */
+    var localZoomMin: Float = ZoomControl.DEFAULT_MIN
+    var localZoomMax: Float = ZoomControl.DEFAULT_MAX
+    /** v0.4.6: whether the bound lens has a flash unit. A lens
+     * without one disables the torch honestly instead of pretending
+     * it can light (the torch lives on specific lenses). */
+    var torchAvailable: Boolean by mutableStateOf(true)
     var fromImageNote by mutableStateOf<String?>(null)
     /** R2-1: while true, the still image (not the live camera) is shown
      * and its results are never overwritten by camera analysis. */
@@ -235,6 +262,55 @@ private fun decodeSampledBitmap(context: Context, uri: Uri, maxDim: Int = 2048):
         }
     }.getOrNull()
 
+/**
+ * v0.4.6: the physical lenses behind the back logical multi-camera,
+ * with 35mm-equivalent focal lengths and per-lens flash availability
+ * — the table the preset chips switch lenses by (the mapping rules
+ * themselves are the pure [LensPlan]). Returns an empty list on any
+ * problem (single-lens device, pre-28 API, missing characteristics):
+ * the caller then keeps the v0.4.5 logical-camera behaviour.
+ */
+private fun enumerateBackLenses(context: Context): List<PhysicalLens> {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return emptyList()
+    return runCatching {
+        val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        val logicalId = manager.cameraIdList.firstOrNull { id ->
+            val ch = manager.getCameraCharacteristics(id)
+            ch.get(CameraCharacteristics.LENS_FACING) ==
+                CameraCharacteristics.LENS_FACING_BACK &&
+                ch.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
+                    ?.contains(
+                        CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA
+                    ) == true
+        } ?: return emptyList()
+        val logical = manager.getCameraCharacteristics(logicalId)
+        logical.physicalCameraIds.mapNotNull { pid ->
+            val ch = manager.getCameraCharacteristics(pid)
+            val focal = ch.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+                ?.minOrNull()
+            val size = ch.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
+            if (focal == null || size == null) {
+                null
+            } else {
+                PhysicalLens(
+                    cameraId = pid,
+                    equivFocalMm = LensPlan.equivFocalMm(focal, size.width, size.height),
+                    hasFlash = ch.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true,
+                )
+            }
+        }.filter { it.equivFocalMm > 0f }
+    }.getOrDefault(emptyList())
+}
+
+/** A CameraSelector that binds exactly one physical camera. */
+private fun selectorForLens(lensId: String): CameraSelector =
+    CameraSelector.Builder()
+        .requireLensFacing(CameraSelector.LENS_FACING_BACK)
+        .addCameraFilter { infos ->
+            infos.filter { Camera2CameraInfo.from(it).cameraId == lensId }
+        }
+        .build()
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScanScreen(
@@ -307,16 +383,56 @@ fun ScanScreen(
         kind = d.kind,
     )
 
-    // v0.4.5: the one door every zoom control goes through — clamp to
-    // the camera's range, publish to state (so the slider, the chips'
-    // selected state and the next pinch all see it at once), then push
-    // to the camera. The pinch handler inside the PreviewView factory
-    // cannot call this (it is bound to the composition that created
-    // the view), so it performs the same two steps inline there.
-    fun applyZoom(ratio: Float) {
-        val clamped = ZoomControl.clamp(ratio, state.zoomMin, state.zoomMax)
-        state.zoom = clamped
-        camera?.cameraControl?.setZoomRatio(clamped)
+    // The one door every zoom control goes through (v0.4.5), now
+    // lens-aware (v0.4.6): state.zoom is the EFFECTIVE ratio (base
+    // lens = 1×), but the bound camera only ever hears its own local
+    // ratio, so every change translates effective → local through
+    // the bound lens's native ratio and clamps to that lens's own
+    // range. Publishing the achieved effective ratio to state keeps
+    // the slider, the chips' selected state and the next pinch in
+    // sync. The pinch handler inside the PreviewView factory cannot
+    // call this (it is bound to the composition that created the
+    // view), so it performs the same steps inline there.
+    fun applyZoom(effective: Float) {
+        val local = ZoomControl.clamp(
+            effective / state.activeLensRatio,
+            state.localZoomMin, state.localZoomMax,
+        )
+        state.zoom = state.activeLensRatio * local
+        camera?.cameraControl?.setZoomRatio(local)
+    }
+
+    // v0.4.6: a preset chip is a lens switch first and a zoom second
+    // — the way the device's own camera treats 0.5×／1×／5×. LensPlan
+    // picks the closest physical lens at or below the preset and
+    // covers the rest with that lens's zoom ratio. When the plan's
+    // lens is the one already in effect (or there is no plan), the
+    // preset is a plain zoom within the bound camera. Switching to
+    // the base lens goes back to the logical camera — the app's
+    // startup state — rather than binding the wide lens directly.
+    fun applyPreset(preset: Float) {
+        val choice = LensPlan.choose(preset, state.lenses)
+        val baseId = LensPlan.base(state.lenses)?.cameraId
+        val currentKey = state.activeLensId ?: baseId
+        if (choice == null || choice.lens.cameraId == currentKey) {
+            applyZoom(preset)
+            return
+        }
+        // The bind below adopts the new lens's range, clamps this
+        // target into it and pushes it to the camera.
+        state.zoom = preset
+        if (choice.lens.cameraId == baseId) {
+            state.activeLensId = null
+            state.activeLensRatio = 1f
+            state.torchAvailable = true
+        } else {
+            state.activeLensId = choice.lens.cameraId
+            state.activeLensRatio = choice.lensRatio
+            state.torchAvailable = choice.lens.hasFlash
+            if (!choice.lens.hasFlash) state.torchOn = false
+        }
+        cameraBound = false
+        cameraFailed = false
     }
 
     // v0.4.2 (FR-SCAN-07 revised): with auto-save-on-detect on, a code is
@@ -539,7 +655,7 @@ fun ScanScreen(
                         val offY = (viewSize.height - drawnH) / 2f
                         val px = offX + d.centerX * scale
                         val py = offY + d.centerY * scale
-                        val pinSizePx = with(density) { 30.dp.toPx() }
+                        val pinSizePx = with(density) { 44.dp.toPx() } // v0.4.6: pin touch box (DetectionPin)
                         DetectionPin(
                             index = index,
                             d = d,
@@ -564,11 +680,21 @@ fun ScanScreen(
                     }
                 }
             } else if (hasPermission) {
-                key(cameraRetryKey) {
+                // v0.4.6: the active lens is part of the key — a
+                // preset that resolves to another physical lens
+                // recreates the view, and the factory below binds
+                // that lens instead (the retry key works the same).
+                key(cameraRetryKey, state.activeLensId) {
                     AndroidView(
                         factory = { ctx ->
                             PreviewView(ctx).apply {
                                 scaleType = PreviewView.ScaleType.FILL_CENTER
+                                // v0.4.6: enumerate the physical
+                                // lenses once, before the first bind.
+                                if (!state.lensEnumDone) {
+                                    state.lensEnumDone = true
+                                    state.lenses = enumerateBackLenses(ctx)
+                                }
                                 val providerFuture = ProcessCameraProvider.getInstance(ctx)
                                 providerFuture.addListener({
                                     val provider = providerFuture.get()
@@ -595,45 +721,93 @@ fun ScanScreen(
                                         }
                                         try {
                                             provider.unbindAll()
+                                            // v0.4.6: bind the physical
+                                            // lens a preset selected, or
+                                            // the logical camera (startup
+                                            // state / no lens plan).
+                                            val selector = state.activeLensId
+                                                ?.let { selectorForLens(it) }
+                                                ?: CameraSelector.DEFAULT_BACK_CAMERA
                                             camera = provider.bindToLifecycle(
                                                 lifecycleOwner,
-                                                CameraSelector.DEFAULT_BACK_CAMERA,
+                                                selector,
                                                 preview,
                                                 analysis,
                                             )
-                                            // B-25: a freshly bound camera starts
-                                            // with torch off and zoom 1x; re-apply
-                                            // the state the UI already shows.
-                                            camera?.cameraControl?.enableTorch(state.torchOn)
-                                            if (state.zoom != 1f) {
-                                                camera?.cameraControl?.setZoomRatio(state.zoom)
-                                            }
-                                            // v0.4.5: adopt this camera's real
-                                            // zoom range, so the presets,
-                                            // pinch and slider all clamp to
-                                            // what the hardware can do (a
-                                            // range that reads as broken is
-                                            // ignored, keeping the defaults).
-                                            camera?.cameraInfo?.zoomState?.value?.let { zs ->
+                                            val bound = camera
+                                            // v0.4.6: adopt the bound
+                                            // camera's own zoom range
+                                            // first (reset to the
+                                            // defaults, so a previous
+                                            // lens's range cannot
+                                            // linger), then derive the
+                                            // effective range the UI
+                                            // clamps to (lens ratio ×
+                                            // local range) and push the
+                                            // target effective zoom
+                                            // through the translation.
+                                            // B-25's rule stands: a
+                                            // freshly bound camera
+                                            // starts at torch off / zoom
+                                            // 1x, so the state the UI
+                                            // shows is re-applied here.
+                                            state.localZoomMin = ZoomControl.DEFAULT_MIN
+                                            state.localZoomMax = ZoomControl.DEFAULT_MAX
+                                            bound?.cameraInfo?.zoomState?.value?.let { zs ->
                                                 if (zs.maxZoomRatio > zs.minZoomRatio) {
-                                                    state.zoomMin = zs.minZoomRatio
-                                                    state.zoomMax = zs.maxZoomRatio
-                                                    val clamped = ZoomControl.clamp(
-                                                        state.zoom, state.zoomMin, state.zoomMax,
-                                                    )
-                                                    if (clamped != state.zoom) {
-                                                        state.zoom = clamped
-                                                        camera?.cameraControl?.setZoomRatio(clamped)
-                                                    }
+                                                    state.localZoomMin = zs.minZoomRatio
+                                                    state.localZoomMax = zs.maxZoomRatio
                                                 }
+                                            }
+                                            state.zoomMin = state.activeLensRatio * state.localZoomMin
+                                            state.zoomMax = state.activeLensRatio * state.localZoomMax
+                                            val local = ZoomControl.clamp(
+                                                state.zoom / state.activeLensRatio,
+                                                state.localZoomMin, state.localZoomMax,
+                                            )
+                                            state.zoom = state.activeLensRatio * local
+                                            if (local != 1f) {
+                                                bound?.cameraControl?.setZoomRatio(local)
+                                            }
+                                            // Torch availability is a
+                                            // property of the bound
+                                            // lens; a lens without a
+                                            // flash unit turns the
+                                            // state off honestly
+                                            // instead of lighting
+                                            // nothing.
+                                            state.torchAvailable = state.activeLensId?.let { id ->
+                                                state.lenses.firstOrNull { it.cameraId == id }
+                                                    ?.hasFlash ?: true
+                                            } ?: true
+                                            if (state.torchOn && state.torchAvailable) {
+                                                bound?.cameraControl?.enableTorch(true)
+                                            } else if (!state.torchAvailable) {
+                                                state.torchOn = false
                                             }
                                             cameraBound = true
                                             cameraFailed = false
                                         } catch (e: Exception) {
-                                            // R2-7: a busy/broken camera is a
-                                            // state the user can act on, not
-                                            // a silent black rectangle.
-                                            cameraFailed = true
+                                            if (state.activeLensId != null) {
+                                                // v0.4.6: a physical lens
+                                                // that will not bind must
+                                                // not dead-end the camera
+                                                // — fall back to the
+                                                // logical camera (the
+                                                // v0.4.5 behaviour) and
+                                                // bind once more. A
+                                                // failure there is the
+                                                // real failure state.
+                                                state.activeLensId = null
+                                                state.activeLensRatio = 1f
+                                                state.torchAvailable = true
+                                                cameraRetryKey++
+                                            } else {
+                                                // R2-7: a busy/broken camera is a
+                                                // state the user can act on, not
+                                                // a silent black rectangle.
+                                                cameraFailed = true
+                                            }
                                         }
                                     }
                                 }, ContextCompat.getMainExecutor(ctx))
@@ -655,17 +829,30 @@ fun ScanScreen(
                                         }
 
                                         override fun onScale(detector: ScaleGestureDetector): Boolean {
-                                            // Same two steps as applyZoom in
-                                            // the composable (clamp → state →
-                                            // camera), inlined: this listener
-                                            // is bound to the composition that
-                                            // created the view.
+                                            // The same steps as applyZoom in
+                                            // the composable (scale the
+                                            // effective ratio within the
+                                            // effective range → translate
+                                            // to the bound lens's local
+                                            // ratio → state → camera),
+                                            // inlined: this listener is
+                                            // bound to the composition that
+                                            // created the view. Pinch stays
+                                            // a plain zoom-ratio scaling
+                                            // inside the bound lens
+                                            // (v0.4.6) — it never switches
+                                            // lenses on its own.
                                             pinchZoom = ZoomControl.scaled(
                                                 pinchZoom, detector.scaleFactor,
                                                 state.zoomMin, state.zoomMax,
                                             )
-                                            state.zoom = pinchZoom
-                                            camera?.cameraControl?.setZoomRatio(pinchZoom)
+                                            val local = ZoomControl.clamp(
+                                                pinchZoom / state.activeLensRatio,
+                                                state.localZoomMin, state.localZoomMax,
+                                            )
+                                            state.zoom = state.activeLensRatio * local
+                                            pinchZoom = state.zoom
+                                            camera?.cameraControl?.setZoomRatio(local)
                                             return true
                                         }
                                     },
@@ -710,7 +897,7 @@ fun ScanScreen(
                         val offY = (viewSize.height - drawnH) / 2f
                         val px = offX + d.centerX * scale
                         val py = offY + d.centerY * scale
-                        val pinSizePx = with(density) { 30.dp.toPx() }
+                        val pinSizePx = with(density) { 44.dp.toPx() } // v0.4.6: pin touch box (DetectionPin)
                         DetectionPin(
                             index = index,
                             d = d,
@@ -750,13 +937,24 @@ fun ScanScreen(
                 // slider's thumb position says the same thing in shape);
                 // no separate numeric readout is added. Shown only
                 // while a live camera is actually bound.
-                if (cameraBound && !cameraFailed) {
+                // v0.4.6: with a usable lens plan the chips are the
+                // lenses the plan can honestly reach (LensPlan's list,
+                // not the bound lens's zoom range — the 1× chip must
+                // stay visible while the tele lens is bound, or there
+                // is no way back), and a tap goes through applyPreset:
+                // a lens switch when the preset lives on another lens.
+                val presets = if (LensPlan.isUsable(state.lenses)) {
+                    LensPlan.visiblePresets(state.lenses)
+                } else {
+                    ZoomControl.visiblePresets(state.zoomMin, state.zoomMax)
+                }
+                if (cameraBound && !cameraFailed && presets.isNotEmpty()) {
                     Row(
                         modifier = Modifier.align(Alignment.BottomCenter)
                             .padding(bottom = 10.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        ZoomControl.visiblePresets(state.zoomMin, state.zoomMax).forEach { preset ->
+                        presets.forEach { preset ->
                             val selected = ZoomControl.isSelected(state.zoom, preset)
                             Box(
                                 modifier = Modifier
@@ -768,11 +966,15 @@ fun ScanScreen(
                                             MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
                                         }
                                     )
-                                    .clickable(role = Role.Button) { applyZoom(preset) }
+                                    .clickable(role = Role.Button) { applyPreset(preset) }
                                     .semantics {
                                         contentDescription = "ズーム ${ZoomControl.label(preset)}"
                                     }
-                                    .padding(horizontal = 12.dp, vertical = 7.dp),
+                                    // v0.4.6 (BEGINNER): a taller
+                                    // touch target — the chips are
+                                    // operated one-handed, often
+                                    // while aiming at a far code.
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Text(
@@ -909,11 +1111,17 @@ fun ScanScreen(
                                 state.torchOn = !state.torchOn
                                 camera?.cameraControl?.enableTorch(state.torchOn)
                             },
-                            enabled = cameraLive,
+                            // v0.4.6: a bound lens without a flash unit
+                            // disables the torch (greyed, not tappable)
+                            // — the honest state, per the R2-7 policy
+                            // for tools that cannot work right now.
+                            enabled = cameraLive && state.torchAvailable,
                         ) {
                             Icon(
                                 imageVector = if (state.torchOn) Icons.Filled.FlashlightOn else Icons.Filled.FlashlightOff,
-                                contentDescription = "懐中電灯",
+                                // v0.4.6 (BEGINNER): the spoken name
+                                // matches the visible label below it.
+                                contentDescription = "ライト",
                                 tint = if (state.torchOn) {
                                     MaterialTheme.colorScheme.primary
                                 } else {
@@ -1145,18 +1353,15 @@ private fun DetectionPin(
     onClick: () -> Unit,
 ) {
     val label = if (d.count > 1) "${index + 1}×${d.count}" else "${index + 1}"
+    // v0.4.6 (BEGINNER): the visible pin stays a 30dp circle, but the
+    // touch target around it is 44dp — a 30dp target over a live
+    // camera view is easy to miss with a fingertip, and a missed tap
+    // lands on the preview (focus) instead of the result. The extra
+    // ring is transparent, so the rendered image does not change;
+    // call sites centre the pin by the 44dp box.
     Box(
         modifier = modifier
-            .size(30.dp)
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.primary)
-            .then(
-                if (opened) {
-                    Modifier.border(2.dp, Color.White, CircleShape)
-                } else {
-                    Modifier
-                }
-            )
+            .size(44.dp)
             .clickable(role = Role.Button) { onClick() }
             .semantics {
                 contentDescription =
@@ -1164,19 +1369,34 @@ private fun DetectionPin(
             },
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = label,
-            // R-3 / UX-3: onPrimary pairs with the primary background in
-            // both themes (white text was unreadable on the light-blue
-            // dark primary).
-            color = MaterialTheme.colorScheme.onPrimary,
-            style = if (label.length >= 3) {
-                MaterialTheme.typography.labelSmall
-            } else {
-                MaterialTheme.typography.labelMedium
-            },
-            fontWeight = FontWeight.Bold,
-        )
+        Box(
+            modifier = Modifier
+                .size(30.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primary)
+                .then(
+                    if (opened) {
+                        Modifier.border(2.dp, Color.White, CircleShape)
+                    } else {
+                        Modifier
+                    }
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = label,
+                // R-3 / UX-3: onPrimary pairs with the primary background in
+                // both themes (white text was unreadable on the light-blue
+                // dark primary).
+                color = MaterialTheme.colorScheme.onPrimary,
+                style = if (label.length >= 3) {
+                    MaterialTheme.typography.labelSmall
+                } else {
+                    MaterialTheme.typography.labelMedium
+                },
+                fontWeight = FontWeight.Bold,
+            )
+        }
     }
 }
 

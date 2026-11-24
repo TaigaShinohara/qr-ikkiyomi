@@ -158,7 +158,19 @@ fun LibraryScreen(
                     )
                 }
             } else {
-                EmptyGuide(message = "条件に合うものがありません")
+                // v0.4.6 (BEGINNER): a search/filter dead end — the
+                // guide now carries the one way out (clear both), so a
+                // first-time user is not left wondering whether the
+                // entries are gone. The entries are untouched; only
+                // the filter is lifted.
+                EmptyGuide(
+                    message = "条件に合うものがありません",
+                    actionLabel = "検索と絞り込みを解除",
+                    onAction = {
+                        query = ""
+                        folderFilter = null
+                    },
+                )
             }
         } else {
             LazyColumn(modifier = Modifier.fillMaxSize()) {

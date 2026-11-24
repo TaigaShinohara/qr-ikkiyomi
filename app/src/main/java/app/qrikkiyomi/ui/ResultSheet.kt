@@ -53,6 +53,24 @@ fun shareText(context: Context, text: String) {
 }
 
 /**
+ * v0.4.6 (BEGINNER): the format name in words a first-time user
+ * already knows. The stored formatName itself is unchanged (it is
+ * what library search matches); this is only how it is spelled on
+ * screen — "QR_CODE" and "EAN_13" are spec-sheet vocabulary, while
+ * the distinction a person needs is QRコード vs バーコード. The
+ * rarer 2D formats (AZTEC, PDF417…) keep their names: there is no
+ * plainer word for them, and they are rare enough to be the
+ * footnote this line is.
+ */
+private fun friendlyFormatName(formatName: String): String = when {
+    formatName == "QR_CODE" -> "QRコード"
+    formatName.startsWith("EAN") || formatName.startsWith("UPC") ||
+        formatName.startsWith("CODE") || formatName == "ITF" ||
+        formatName == "CODABAR" -> "バーコード"
+    else -> formatName.replace("_", " ")
+}
+
+/**
  * Catalog: ResultSheet — shows what a code contains and offers exactly one
  * big recommended action plus quiet secondary actions (spec section 6).
  * URL codes are never opened automatically; this sheet is the confirmation,
@@ -129,8 +147,10 @@ fun ResultContent(
         ) {
             TypeChip(kind)
             // R-5: the format name is a footnote-level fact, not a peer chip.
+            // v0.4.6 (BEGINNER): spelled in everyday words (see
+            // friendlyFormatName) — the spec name stays in storage.
             Text(
-                formatName.replace("_", " "),
+                friendlyFormatName(formatName),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -170,7 +190,17 @@ fun ResultContent(
             // v0.4.3 (MINIMAL N-6): the SSID is already the headline
             // ("Wi-Fi: <ssid>"), so this line carries only the encryption;
             // the pair is still fully visible in the sheet.
-            Text("暗号化: ${wifi.encryption.ifEmpty { "なし" }}")
+            // v0.4.6 (BEGINNER): the label is "セキュリティ" — the word
+            // the system's own Wi-Fi settings use — and an open network
+            // says what it means for the user (no password needed), not
+            // just the spec token "nopass".
+            val securityLabel = when {
+                wifi.encryption.isEmpty() ||
+                    wifi.encryption.equals("nopass", ignoreCase = true) ->
+                    "なし（パスワード不要）"
+                else -> wifi.encryption
+            }
+            Text("セキュリティ: $securityLabel")
             // R2-12: the connect action is a suggestion to the OS, not a
             // connection this app makes itself; say so before the tap.
             // v0.4.3 (MINIMAL N-6): trimmed to the two facts — a request
@@ -225,7 +255,7 @@ fun ResultContent(
         if (collapseRawByDefault) {
             // v0.4.4 (MINIMAL J-1): folded for every kind, whatever the
             // payload — nothing of the raw block is on screen until the
-            // "生データを表示" button below is tapped. Expanded, it
+            // "元のデータを表示" button below is tapped. Expanded, it
             // shows the full raw value, so for Wi-Fi the same tap is
             // also the R2-3 unmask; masked-by-default still holds
             // because the folded state shows nothing at all.
@@ -391,12 +421,15 @@ fun ResultContent(
             // the copy/share actions above work the same folded or not.
             if (collapseRawByDefault || isMasked) {
                 SecondaryActionButton(
-                    if (showRaw) "生データを隠す" else "生データを表示",
+                    // v0.4.6 (BEGINNER): "生データ" is developer
+                    // vocabulary; the button now says what the tap
+                    // shows — the code's content exactly as read.
+                    if (showRaw) "元のデータを隠す" else "元のデータを表示",
                     onClick = { showRaw = !showRaw },
                     modifier = if (collapseRawByDefault) {
                         Modifier.semantics {
                             stateDescription =
-                                if (showRaw) "生データは表示中" else "生データは折りたたみ中"
+                                if (showRaw) "元のデータは表示中" else "元のデータは折りたたみ中"
                         }
                     } else {
                         Modifier
@@ -439,7 +472,10 @@ private fun connectWifi(context: Context, ssid: String, password: String, encryp
         if (status == WifiManager.STATUS_NETWORK_SUGGESTIONS_SUCCESS) {
             Toast.makeText(context, "接続リクエストを送りました。通知またはダイアログで承認すると接続されます", Toast.LENGTH_LONG).show()
         } else {
-            Toast.makeText(context, "接続リクエストに失敗しました（コード $status）", Toast.LENGTH_LONG).show()
+            // v0.4.6 (BEGINNER): the raw status code was a number only
+            // a developer can act on; the message keeps the fact and
+            // drops the jargon.
+            Toast.makeText(context, "接続リクエストに失敗しました", Toast.LENGTH_LONG).show()
         }
     } catch (e: Exception) {
         Toast.makeText(context, "接続リクエストに失敗しました", Toast.LENGTH_SHORT).show()

@@ -448,7 +448,10 @@ fun CreateScreen(
                     }
                 }
                 Text(
-                    "高いほど汚れ・欠けに強くなります（既定 M）。",
+                    // v0.4.6 (BEGINNER): the chips alone (L/M/Q/H) do not
+                    // say which end is stronger; the sentence now walks
+                    // the chip order itself.
+                    "L→M→Q→H の順に、汚れ・欠けに強くなります（既定は M）。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -464,7 +467,10 @@ fun CreateScreen(
                     }
                 }
                 Spacer(Modifier.height(10.dp))
-                Text("余白（クワイエットゾーン、マス数）", style = MaterialTheme.typography.labelLarge)
+                // v0.4.6 (BEGINNER): "クワイエットゾーン" is spec
+                // vocabulary; the everyday word (余白) already leads,
+                // so the parenthesis keeps only the unit.
+                Text("余白（マスの数）", style = MaterialTheme.typography.labelLarge)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(0, 2, 4, 8).forEach { m ->
                         FilterChip(
