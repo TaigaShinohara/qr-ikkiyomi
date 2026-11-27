@@ -105,6 +105,9 @@ import app.qrikkiyomi.core.AppearanceTracker
 import app.qrikkiyomi.core.CodeClassifier
 import app.qrikkiyomi.core.CodeKind
 import app.qrikkiyomi.core.Entry
+import app.qrikkiyomi.core.LedgerAddOutcome
+import app.qrikkiyomi.core.LedgerEntry
+import app.qrikkiyomi.core.LedgerSession
 import app.qrikkiyomi.core.LensPlan
 import app.qrikkiyomi.core.Origin
 import app.qrikkiyomi.core.PhysicalLens
@@ -121,6 +124,9 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+
+/** Phase 2: the ledger sub-views hosted by the scan tab. */
+enum class LedgerView { HIDDEN, LIST, DETAIL }
 
 /** One detected code in the current frame (duplicates already merged). */
 data class DetectedCode(
@@ -184,6 +190,25 @@ class ScanState {
      * without one disables the torch honestly instead of pretending
      * it can light (the torch lives on specific lenses). */
     var torchAvailable: Boolean by mutableStateOf(true)
+    /** Phase 2 (v0.5.0): continuous-scan mode (§2.3) is running —
+     * detections feed the active ledger instead of the result list,
+     * and no result sheet opens. Held here so a tab round-trip keeps
+     * the session going (the ledger data itself lives in MainActivity
+     * and is persisted on every scan). */
+    var continuousMode by mutableStateOf(false)
+    /** The ledger session currently being fed, or null. */
+    var activeSessionId by mutableStateOf<String?>(null)
+    /** Phase 2: while paused, the camera keeps running (pins stay
+     * live, the appearance tracker keeps tracking) but nothing is
+     * added to the ledger — stepping away from the desk must not
+     * record the room. */
+    var continuousPaused by mutableStateOf(false)
+    /** Phase 2: the most recent ledger feed was a duplicate — the
+     * SessionCounter's warning state (§2.3). */
+    var lastLedgerDuplicate by mutableStateOf(false)
+    /** Phase 2: which ledger sub-view covers the scan tab. */
+    var ledgerView by mutableStateOf(LedgerView.HIDDEN)
+    var ledgerDetailId by mutableStateOf<String?>(null)
     var fromImageNote by mutableStateOf<String?>(null)
     /** R2-1: while true, the still image (not the live camera) is shown
      * and its results are never overwritten by camera analysis. */
@@ -335,6 +360,19 @@ fun ScanScreen(
     onScanned: (Entry) -> Unit,
     onSaveEntries: (List<Entry>) -> Int,
     onMakeQrFromText: (String) -> Unit,
+    // Phase 2 (v0.5.0): the ledger book, held and persisted by
+    // MainActivity. [activeSession] is the session [ScanState] says
+    // is being fed (null when none); the callbacks mutate + persist.
+    ledgers: List<LedgerSession>,
+    activeSession: LedgerSession?,
+    warnOnLedgerDuplicate: Boolean,
+    onLedgerStart: () -> String,
+    onLedgerAdd: (String, LedgerEntry) -> LedgerAddOutcome,
+    onLedgerUndoLast: (String) -> Unit,
+    onLedgerDeleteEntry: (String, String) -> Unit,
+    onLedgerEnd: (String) -> Unit,
+    onLedgerRename: (String, String) -> Unit,
+    onLedgerDelete: (String) -> Unit,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -375,6 +413,9 @@ fun ScanScreen(
 
     val detections = state.detections
     val sheetOpen by rememberUpdatedState(state.selected != null)
+    // Phase 2: while a ledger view covers the tab, camera frames are
+    // dropped unread — the operator is reviewing records, not scanning.
+    val ledgerOpen by rememberUpdatedState(state.ledgerView != LedgerView.HIDDEN)
     var camera by remember { mutableStateOf<Camera?>(null) }
     var viewSize by remember { mutableStateOf(IntSize.Zero) }
     // R2-7 / P2-9: camera start is a visible state, and a failed start is
@@ -480,11 +521,87 @@ fun ScanScreen(
     // store layer still dedupes against existing history, so a code that
     // leaves and returns does not produce a duplicate row, and a code
     // saved this way reads as "保存済み" everywhere (P2-5).
-    fun autoSaveAppeared(current: List<DetectedCode>) {
-        if (!autoSaveOnDetect) return
+    /** The codes in [current] that have just appeared (once per appearance). */
+    fun freshAppeared(current: List<DetectedCode>): List<DetectedCode> {
         val byRaw = current.associateBy { it.rawValue }
-        state.appearanceTracker.onDetections(current.map { it.rawValue })
-            .forEach { raw -> byRaw[raw]?.let { onScanned(entryOf(it)) } }
+        return state.appearanceTracker.onDetections(current.map { it.rawValue })
+            .mapNotNull { byRaw[it] }
+    }
+
+    fun saveAppeared(fresh: List<DetectedCode>) {
+        if (!autoSaveOnDetect) return
+        fresh.forEach { onScanned(entryOf(it)) }
+    }
+
+    // ---- Phase 2: continuous-scan / ledger mode (§2.3) ----
+
+    /**
+     * Feeds freshly-appeared codes into the active ledger, in the
+     * order they appeared, and gives the read a body-level answer:
+     * one short vibration for a new code, the stronger duplicate
+     * pattern + the counter's warning state for a repeat (§2.3 —
+     * the warning is what a reception desk actually needs from a
+     * second read of the same ticket). While paused, nothing is fed.
+     * Ledger scans never touch the library history: the ledger is
+     * the record (see core/Ledger.kt).
+     */
+    fun ledgerFeed(fresh: List<DetectedCode>) {
+        val sessionId = state.activeSessionId ?: return
+        if (state.continuousPaused) return
+        var addedAny = false
+        var lastOutcome: LedgerAddOutcome? = null
+        for (d in fresh) {
+            val outcome = onLedgerAdd(
+                sessionId,
+                LedgerEntry(rawValue = d.rawValue, formatName = d.formatName, kind = d.kind),
+            )
+            lastOutcome = outcome
+            if (outcome == LedgerAddOutcome.ADDED) addedAny = true
+        }
+        val outcome = lastOutcome ?: return
+        val duplicate = outcome == LedgerAddOutcome.DUPLICATE
+        state.lastLedgerDuplicate = duplicate
+        when {
+            duplicate && warnOnLedgerDuplicate -> vibrateDuplicate(context)
+            addedAny || duplicate -> if (vibrateOnDetect) vibrateOnce(context)
+        }
+    }
+
+    fun startLedger() {
+        val id = onLedgerStart()
+        state.activeSessionId = id
+        state.continuousMode = true
+        state.continuousPaused = false
+        state.lastLedgerDuplicate = false
+        // The normal mode's leftovers belong to the previous scene.
+        detections.clear()
+        state.missCounts.clear()
+        state.openedRaw = null
+        state.appearanceTracker.reset()
+    }
+
+    fun endLedger() {
+        val id = state.activeSessionId ?: return
+        onLedgerEnd(id)
+        state.continuousMode = false
+        state.activeSessionId = null
+        state.continuousPaused = false
+        // Ending lands on the finished ledger: review it, export the
+        // CSV, rename it — the desk work is done there.
+        state.ledgerDetailId = id
+        state.ledgerView = LedgerView.DETAIL
+    }
+
+    fun resumeLedger(session: LedgerSession) {
+        state.activeSessionId = session.id
+        state.continuousMode = true
+        state.continuousPaused = false
+        state.lastLedgerDuplicate = false
+        state.ledgerView = LedgerView.HIDDEN
+        detections.clear()
+        state.missCounts.clear()
+        state.openedRaw = null
+        state.appearanceTracker.reset()
     }
 
     fun handleDetected(list: List<DetectedCode>, fromImage: Boolean) {
@@ -494,7 +611,9 @@ fun ScanScreen(
         val prevRaws = detections.map { it.rawValue }.toSet()
         val grew = list.any { it.rawValue !in prevRaws }
         // R-2 / UX-2: vibrate once when the set grows, never per code.
-        if (grew && vibrateOnDetect) vibrateOnce(context)
+        // Phase 2: in continuous mode the ledger feed owns the
+        // feedback (a read must be felt as "recorded", not "seen").
+        if (grew && vibrateOnDetect && !state.continuousMode) vibrateOnce(context)
 
         if (fromImage) {
             // A still image is a single shot: replace wholesale.
@@ -509,7 +628,7 @@ fun ScanScreen(
             state.fromImageNote = if (list.isEmpty()) "画像の中にコードは見つかりませんでした" else null
             // A fresh image is a fresh appearance for everything in it.
             state.appearanceTracker.reset()
-            autoSaveAppeared(list)
+            saveAppeared(freshAppeared(list))
             return
         }
 
@@ -545,7 +664,14 @@ fun ScanScreen(
         detections.addAll(merged)
         // The tracker sees the merged set (including briefly-held codes),
         // so a 1–2 frame flicker does not count as a new appearance.
-        autoSaveAppeared(merged)
+        // Phase 2: in continuous mode the appearances go to the ledger
+        // instead of the history — one scan, one home (core/Ledger.kt).
+        val fresh = freshAppeared(merged)
+        if (state.continuousMode) {
+            ledgerFeed(fresh)
+        } else {
+            saveAppeared(fresh)
+        }
     }
 
     // R-2 (revised in v0.4.2): opening a code still saves it when the
@@ -656,13 +782,85 @@ fun ScanScreen(
 
     val imageModeActive = state.imageMode && state.imageBitmap != null
 
+    // B-12 cleanup, hoisted above the ledger branch below: the camera,
+    // analyzer executor and ML Kit client are released when this
+    // screen leaves the composition — and ONLY then. The ledger views
+    // return early from this composable, so this effect must already
+    // be registered before that return, or opening a ledger would
+    // tear the camera down and close the scanner for good.
+    DisposableEffect(Unit) {
+        onDispose {
+            cameraGone.set(true)
+            cameraProvider?.unbindAll()
+            analysisExecutor.shutdown()
+            scanner.close()
+        }
+    }
+
+    // Phase 2: opening a ledger view parks the camera (the preview is
+    // not composed, and a bound-but-unwatched camera would keep
+    // analysing the room); coming back rebinds it via the retry key.
+    var prevLedgerView by remember { mutableStateOf(state.ledgerView) }
+    LaunchedEffect(state.ledgerView) {
+        if (state.ledgerView != prevLedgerView) {
+            prevLedgerView = state.ledgerView
+            if (state.ledgerView != LedgerView.HIDDEN) {
+                cameraProvider?.unbindAll()
+                cameraBound = false
+            } else {
+                cameraRetryKey++
+            }
+        }
+    }
+
+    // Phase 2: the ledger list / detail cover the whole tab. The
+    // session data is MainActivity's; this screen only routes.
+    if (state.ledgerView == LedgerView.LIST) {
+        LedgerListView(
+            sessions = ledgers,
+            onBack = { state.ledgerView = LedgerView.HIDDEN },
+            onOpen = { s ->
+                state.ledgerDetailId = s.id
+                state.ledgerView = LedgerView.DETAIL
+            },
+        )
+        return
+    }
+    if (state.ledgerView == LedgerView.DETAIL) {
+        val detail = ledgers.firstOrNull { it.id == state.ledgerDetailId }
+        if (detail == null) {
+            LedgerListView(
+                sessions = ledgers,
+                onBack = { state.ledgerView = LedgerView.HIDDEN },
+                onOpen = { s -> state.ledgerDetailId = s.id },
+            )
+        } else {
+            LedgerDetailView(
+                session = detail,
+                onBack = { state.ledgerView = LedgerView.LIST },
+                onResume = { resumeLedger(it) },
+                onEnd = { onLedgerEnd(it.id) },
+                onRename = { s, name -> onLedgerRename(s.id, name) },
+                onDeleteEntry = { s, entryId -> onLedgerDeleteEntry(s.id, entryId) },
+                onDeleteSession = { s ->
+                    onLedgerDelete(s.id)
+                    state.ledgerDetailId = null
+                    state.ledgerView = LedgerView.LIST
+                },
+            )
+        }
+        return
+    }
+
     // v0.4.2: once codes are on screen in camera mode, the result list —
     // not the preview — gets the larger share of the screen (preview
     // ≈ 2 : list ≈ 3 of the flexible height), so a full sweep can be
     // read at a glance. Pin mapping is unaffected: pins are positioned
     // from the preview box's measured size (viewSize) either way.
     // Image mode keeps the previous layout, as does the empty state.
-    val wideList = !imageModeActive && detections.isNotEmpty()
+    // Phase 2: continuous mode always takes the wide split — the
+    // ledger being built is the point of the mode, camera second.
+    val wideList = !imageModeActive && (detections.isNotEmpty() || state.continuousMode)
 
     Column(modifier = Modifier.fillMaxSize()) {
         Box(
@@ -705,7 +903,10 @@ fun ScanScreen(
                                     (py - pinSizePx / 2).roundToInt(),
                                 )
                             },
-                            onClick = { openResult(d) },
+                            // Phase 2 (§2.3): in continuous mode a pin
+                            // tap must not open the result sheet — the
+                            // whole point of the mode is never stopping.
+                            onClick = { if (!state.continuousMode) openResult(d) },
                         )
                     }
                 }
@@ -752,7 +953,7 @@ fun ScanScreen(
                                             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                                             .build()
                                         analysis.setAnalyzer(analysisExecutor) { proxy ->
-                                            if (sheetOpen) {
+                                            if (sheetOpen || ledgerOpen) {
                                                 proxy.close()
                                             } else {
                                                 analyzeProxy(scanner, proxy) { list ->
@@ -996,7 +1197,10 @@ fun ScanScreen(
                                     (py - pinSizePx / 2).roundToInt(),
                                 )
                             },
-                            onClick = { openResult(d) },
+                            // Phase 2 (§2.3): in continuous mode a pin
+                            // tap must not open the result sheet — the
+                            // whole point of the mode is never stopping.
+                            onClick = { if (!state.continuousMode) openResult(d) },
                         )
                     }
                 }
@@ -1256,7 +1460,11 @@ fun ScanScreen(
                     ) {
                         IconButton(
                             onClick = { imagePicker.launch("image/*") },
-                            enabled = !state.imageScanning,
+                            // Phase 2: still-image reading is a mode
+                            // switch, and a mode switch mid-session
+                            // would abandon the desk — disabled while
+                            // continuous mode runs.
+                            enabled = !state.imageScanning && !state.continuousMode,
                         ) {
                             Icon(
                                 Icons.Filled.PhotoLibrary,
@@ -1282,7 +1490,10 @@ fun ScanScreen(
                     ) {
                         IconButton(
                             onClick = { switchCamera() },
-                            enabled = cameraLive,
+                            // Phase 2: switching cameras clears the
+                            // detections the session is watching, so it
+                            // is disabled while continuous mode runs.
+                            enabled = cameraLive && !state.continuousMode,
                         ) {
                             Icon(
                                 imageVector = Icons.Filled.Cameraswitch,
@@ -1308,6 +1519,39 @@ fun ScanScreen(
             }
         }
 
+        // Phase 2 (§2.3): the mode strip. Idle, it is the way into
+        // continuous mode and into the ledger book; running, it is
+        // the SessionCounter — count, most recent read, duplicate
+        // warning, and the desk's three actions (pause / undo /
+        // finish). Image mode shows neither: it has its own state.
+        if (state.continuousMode) {
+            SessionCounter(
+                session = activeSession,
+                paused = state.continuousPaused,
+                duplicateWarning = state.lastLedgerDuplicate && warnOnLedgerDuplicate,
+                onTogglePause = { state.continuousPaused = !state.continuousPaused },
+                onUndo = { state.activeSessionId?.let { onLedgerUndoLast(it) } },
+                onEnd = { endLedger() },
+            )
+        } else if (!imageModeActive) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Box(modifier = Modifier.weight(1f)) {
+                    PrimaryActionButton(
+                        "連続スキャンを開始",
+                        enabled = hasPermission && !cameraFailed,
+                    ) { startLedger() }
+                }
+                SecondaryActionButton(
+                    "台帳（${ledgers.size}）",
+                    onClick = { state.ledgerView = LedgerView.LIST },
+                )
+            }
+        }
+
         // Result list: number + kind + preview; tap opens the result sheet.
         // v0.4.3 (MINIMAL N-2): in image mode the empty-state line ("aim
         // at a code…") describes the wrong scene — the image note above
@@ -1317,7 +1561,39 @@ fun ScanScreen(
         // to fall into the list branch anyway and show a "0件見つけま
         // した（タップで開く）" heading — nothing there to tap, and
         // the toolbar note already carries that state.
-        if (detections.isNotEmpty()) {
+        if (state.continuousMode) {
+            // Phase 2: the ledger being built replaces the result
+            // list. Newest first — the read just made is the one to
+            // check — while the sequence numbers keep the true order
+            // (the detail view and the CSV are chronological).
+            val session = activeSession
+            Column(modifier = Modifier.weight(3f)) {
+                if (session == null || session.entries.isEmpty()) {
+                    Text(
+                        "コードにかざすと、読んだ順にここへ溜まります",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                    )
+                } else {
+                    val dupRaws = session.duplicateRaws()
+                    LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f)) {
+                        itemsIndexed(
+                            session.entries.asReversed(),
+                            key = { _, e -> e.id },
+                        ) { revIndex, e ->
+                            LedgerRow(
+                                index = session.entries.size - 1 - revIndex,
+                                entry = e,
+                                duplicated = e.rawValue in dupRaws,
+                                onDelete = { onLedgerDeleteEntry(session.id, e.id) },
+                            )
+                        }
+                    }
+                }
+            }
+        } else if (detections.isNotEmpty()) {
           Column(modifier = if (wideList) Modifier.weight(3f) else Modifier) {
             // UX-6: the heading says how many and what a tap does.
             // R2-9: it is a live region, so TalkBack announces the count
@@ -1442,18 +1718,6 @@ fun ScanScreen(
             Spacer(Modifier.height(24.dp))
         }
     }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            // B-12: release everything this screen holds — camera,
-            // analyzer executor, ML Kit client — when the tab is left.
-            // (The results themselves live in ScanState and survive.)
-            cameraGone.set(true)
-            cameraProvider?.unbindAll()
-            analysisExecutor.shutdown()
-            scanner.close()
-        }
-    }
 }
 
 /**
@@ -1519,6 +1783,91 @@ private fun DetectionPin(
     }
 }
 
+/**
+ * Catalog: SessionCounter — the continuous mode's home base, fixed
+ * under the toolbar (UI_CATALOG: 表示位置は下部固定）. The count is
+ * the hero; below it, the most recent read, so the operator can work
+ * eyes-up and only glance to confirm. The duplicate warning appears
+ * only when the last read was one (§2.3) — quiet normally, loud only
+ * then (ART_DIRECTION §2). The three desk actions are all secondary
+ * buttons: while the mode runs, the recommended action is "keep
+ * scanning", which needs no button at all.
+ */
+@Composable
+private fun SessionCounter(
+    session: LedgerSession?,
+    paused: Boolean,
+    duplicateWarning: Boolean,
+    onTogglePause: () -> Unit,
+    onUndo: () -> Unit,
+    onEnd: () -> Unit,
+) {
+    val count = session?.entries?.size ?: 0
+    val last = session?.entries?.lastOrNull()
+    Surface(color = MaterialTheme.colorScheme.surface) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            androidx.compose.material3.HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant,
+            )
+            Column(
+                modifier = Modifier.fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "${count}件",
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.semantics {
+                            liveRegion = LiveRegionMode.Polite
+                            contentDescription = "台帳の件数 ${count}件"
+                        },
+                    )
+                    if (paused) {
+                        Spacer(Modifier.width(10.dp))
+                        MiniChip("一時停止中")
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        if (last == null) {
+                            "まだ読んでいません"
+                        } else {
+                            "直近: " + CodeClassifier.summary(last.rawValue, last.kind)
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                if (duplicateWarning) {
+                    Spacer(Modifier.height(6.dp))
+                    WarningBanner("重複しています — このコードはこの台帳で読み済みです")
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SecondaryActionButton(
+                        if (paused) "再開する" else "一時停止",
+                        onClick = onTogglePause,
+                        modifier = Modifier.weight(1f),
+                    )
+                    SecondaryActionButton(
+                        "1件戻す",
+                        onClick = onUndo,
+                        modifier = Modifier.weight(1f),
+                        enabled = count > 0,
+                    )
+                    SecondaryActionButton(
+                        "終了",
+                        onClick = onEnd,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Suppress("DEPRECATION")
 private fun analyzeProxy(
     scanner: com.google.mlkit.vision.barcode.BarcodeScanner,
@@ -1545,6 +1894,27 @@ private fun analyzeProxy(
             .addOnCompleteListener { proxy.close() }
     } catch (e: Exception) {
         runCatching { proxy.close() }
+    }
+}
+
+/**
+ * Phase 2 (§2.3): the duplicate warning's vibration — two clear
+ * pulses, unmistakably different from the single short tick of a
+ * normal read, so "already read" is felt without looking.
+ */
+private fun vibrateDuplicate(context: Context) {
+    try {
+        val effect = VibrationEffect.createWaveform(longArrayOf(0, 70, 60, 70), -1)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val vm = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+            vm.defaultVibrator.vibrate(effect)
+        } else {
+            @Suppress("DEPRECATION")
+            val v = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            v.vibrate(effect)
+        }
+    } catch (e: Exception) {
+        // Vibration is a hint only; never let it break scanning.
     }
 }
 

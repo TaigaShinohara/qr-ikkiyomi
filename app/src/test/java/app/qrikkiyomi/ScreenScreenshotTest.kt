@@ -9,10 +9,14 @@ import androidx.compose.runtime.Composable
 import app.qrikkiyomi.core.CodeKind
 import app.qrikkiyomi.core.CreateType
 import app.qrikkiyomi.core.Entry
+import app.qrikkiyomi.core.LedgerAddOutcome
+import app.qrikkiyomi.core.LedgerEntry
+import app.qrikkiyomi.core.LedgerSession
 import app.qrikkiyomi.core.Origin
 import app.qrikkiyomi.ui.CreateScreen
 import app.qrikkiyomi.ui.CreateState
 import app.qrikkiyomi.ui.DetectedCode
+import app.qrikkiyomi.ui.LedgerView
 import app.qrikkiyomi.ui.LibraryScreen
 import app.qrikkiyomi.ui.QrTheme
 import app.qrikkiyomi.ui.ResultContent
@@ -79,7 +83,11 @@ class ScreenScreenshotTest {
         }
     }
 
-    private fun scanScreenContent(state: ScanState): @Composable () -> Unit = {
+    private fun scanScreenContent(
+        state: ScanState,
+        ledgers: List<LedgerSession> = emptyList(),
+        activeSession: LedgerSession? = null,
+    ): @Composable () -> Unit = {
         ScanScreen(
             state = state,
             sharedImageUri = null,
@@ -95,8 +103,49 @@ class ScreenScreenshotTest {
             onScanned = {},
             onSaveEntries = { 0 },
             onMakeQrFromText = {},
+            ledgers = ledgers,
+            activeSession = activeSession,
+            warnOnLedgerDuplicate = true,
+            onLedgerStart = { "shot-session" },
+            onLedgerAdd = { _, _ -> LedgerAddOutcome.ADDED },
+            onLedgerUndoLast = {},
+            onLedgerDeleteEntry = { _, _ -> },
+            onLedgerEnd = {},
+            onLedgerRename = { _, _ -> },
+            onLedgerDelete = {},
         )
     }
+
+    /** A finished-looking session fixture shared by the Phase 2 shots. */
+    private fun ledgerFixture(): LedgerSession = LedgerSession(
+        id = "shot-ledger",
+        name = "学祭 受付",
+        startedAt = 1763776800000L,
+        endedAt = 1763780400000L,
+        entries = listOf(
+            LedgerEntry(
+                id = "le-1",
+                rawValue = "https://example.com/ticket/001",
+                formatName = "QR_CODE",
+                kind = CodeKind.URL,
+                scannedAt = 1763776860000L,
+            ),
+            LedgerEntry(
+                id = "le-2",
+                rawValue = "4901234567890",
+                formatName = "EAN_13",
+                kind = CodeKind.TEXT,
+                scannedAt = 1763776920000L,
+            ),
+            LedgerEntry(
+                id = "le-3",
+                rawValue = "https://example.com/ticket/001",
+                formatName = "QR_CODE",
+                kind = CodeKind.URL,
+                scannedAt = 1763776980000L,
+            ),
+        ),
+    )
 
     /** First launch: no camera permission yet — reason first, then the ask. */
     @Test
@@ -142,6 +191,58 @@ class ScreenScreenshotTest {
             )
         }
         shot("scan_image_mode.png", scanScreenContent(state))
+    }
+
+    /**
+     * Phase 2 (v0.5.0): continuous mode mid-session — the counter
+     * (3件・直近・重複警告）, the desk actions, and the ledger rows
+     * newest-first with the duplicate pair marked. The preview area
+     * shows the permission rationale because Robolectric has no
+     * camera permission; on a device it is the live preview.
+     */
+    @Test
+    fun scan_ledgerActive() {
+        val session = ledgerFixture().copy(endedAt = null)
+        val state = ScanState().apply {
+            continuousMode = true
+            activeSessionId = session.id
+            lastLedgerDuplicate = true
+        }
+        shot(
+            "scan_ledger_active.png",
+            scanScreenContent(state, ledgers = listOf(session), activeSession = session),
+        )
+    }
+
+    /** Phase 2: the ledger book — one finished, one unfinished session. */
+    @Test
+    fun ledger_list() {
+        val open = LedgerSession(
+            id = "shot-ledger-open",
+            name = "11/22 10:00 の台帳",
+            startedAt = 1763773200000L,
+            endedAt = null,
+            entries = ledgerFixture().entries,
+        )
+        val state = ScanState().apply { ledgerView = LedgerView.LIST }
+        shot(
+            "ledger_list.png",
+            scanScreenContent(state, ledgers = listOf(ledgerFixture(), open)),
+        )
+    }
+
+    /** Phase 2: one session's record — rows in scan order, CSV action. */
+    @Test
+    fun ledger_detail() {
+        val session = ledgerFixture()
+        val state = ScanState().apply {
+            ledgerView = LedgerView.DETAIL
+            ledgerDetailId = session.id
+        }
+        shot(
+            "ledger_detail.png",
+            scanScreenContent(state, ledgers = listOf(session)),
+        )
     }
 
     /** Create: URL type with input — live QR preview pinned on top. */
@@ -222,6 +323,8 @@ class ScreenScreenshotTest {
                 onToggleAutoSave = {},
                 vibrateOnDetect = true,
                 onToggleVibrate = {},
+                warnOnLedgerDuplicate = true,
+                onToggleWarnOnLedgerDuplicate = {},
                 autoDeleteDays = 0,
                 onSetAutoDeleteDays = {},
                 onExportBackup = {},

@@ -34,6 +34,8 @@ fun SettingsScreen(
     onToggleAutoSave: (Boolean) -> Unit,
     vibrateOnDetect: Boolean,
     onToggleVibrate: (Boolean) -> Unit,
+    warnOnLedgerDuplicate: Boolean,
+    onToggleWarnOnLedgerDuplicate: (Boolean) -> Unit,
     autoDeleteDays: Int,
     onSetAutoDeleteDays: (Int) -> Unit,
     onExportBackup: () -> Unit,
@@ -96,6 +98,22 @@ fun SettingsScreen(
                 Text("検出時に振動", style = MaterialTheme.typography.bodyLarge)
             }
             Switch(checked = vibrateOnDetect, onCheckedChange = onToggleVibrate)
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                // Phase 2 (§2.3): the duplicate warning is spec'd as
+                // optional — this is its switch. The description keeps
+                // only what the warning does that the label cannot say.
+                Text("連続スキャンで重複を警告", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "台帳に読み済みのコードを、振動と表示で知らせます",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = warnOnLedgerDuplicate, onCheckedChange = onToggleWarnOnLedgerDuplicate)
         }
 
         Spacer(Modifier.height(QrSpacing.section))

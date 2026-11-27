@@ -114,6 +114,7 @@ fun pruneAgedScans(entries: List<Entry>, days: Int, now: Long): List<Entry> {
  */
 class Store(context: Context) {
     private val file = File(context.filesDir, "library.json")
+    private val ledgerFile = File(context.filesDir, "ledgers.json")
     private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
     private val lock = Any()
 
@@ -196,6 +197,58 @@ class Store(context: Context) {
     var cameraPermissionRequested: Boolean
         get() = prefs.getBoolean("cameraPermissionRequested", false)
         set(v) { prefs.edit().putBoolean("cameraPermissionRequested", v).apply() }
+
+    // ---- Phase 2: continuous-scan ledgers (spec §2.3) ----
+    //
+    // Ledgers live in their own file, apart from the library: a work
+    // session is not history, and the two never mix (the decision is
+    // recorded at the top of core/Ledger.kt). Same discipline as the
+    // library — one broken row cannot empty the file, writes are
+    // atomic, and a failed write never crashes the caller. Sessions
+    // come back newest-first.
+
+    fun loadLedgers(): MutableList<LedgerSession> = synchronized(lock) {
+        if (!ledgerFile.exists()) return mutableListOf()
+        try {
+            val arr = JSONArray(ledgerFile.readText(Charsets.UTF_8))
+            val out = mutableListOf<LedgerSession>()
+            val seenIds = HashSet<String>()
+            for (i in 0 until arr.length()) {
+                val s = runCatching { ledgerSessionFromJson(arr.getJSONObject(i)) }.getOrNull()
+                if (s != null && seenIds.add(s.id)) out += s
+            }
+            out.sortByDescending { it.startedAt }
+            out
+        } catch (e: Exception) {
+            runCatching {
+                ledgerFile.copyTo(File(ledgerFile.parentFile, "ledgers.json.corrupt"), overwrite = true)
+            }
+            mutableListOf()
+        }
+    }
+
+    fun saveLedgers(sessions: List<LedgerSession>) = synchronized(lock) {
+        runCatching {
+            val arr = JSONArray()
+            sessions.forEach { arr.put(it.toJson()) }
+            val tmp = File(ledgerFile.parentFile, "ledgers.json.tmp")
+            tmp.writeText(arr.toString(), Charsets.UTF_8)
+            if (!tmp.renameTo(ledgerFile)) {
+                tmp.copyTo(ledgerFile, overwrite = true)
+                tmp.delete()
+            }
+        }
+    }
+
+    /**
+     * Phase 2 (§2.3): warn — vibration pattern + banner — when a code
+     * that is already in the active ledger is read again. The spec
+     * makes the warning optional ("設定でオフ可"); default on, because
+     * at a reception desk the warning IS the feature.
+     */
+    var warnOnLedgerDuplicate: Boolean
+        get() = prefs.getBoolean("warnOnLedgerDuplicate", true)
+        set(v) { prefs.edit().putBoolean("warnOnLedgerDuplicate", v).apply() }
 
     /** Serialises the whole library as the backup JSON (FR-EXPORT-04). */
     fun backupJson(entries: List<Entry>): String {

@@ -25,12 +25,15 @@ golden は `app/src/test/screenshots/`。
 
 | ファイル | 画面・状態 |
 |---|---|
-| `scan_permission.png` | スキャン：カメラ許可前の案内（起動直後の画面） |
+| `scan_permission.png` | スキャン：カメラ許可前の案内（起動直後の画面。v0.5.0 で連続スキャンのモード帯が加わった） |
 | `scan_image_mode.png` | スキャン：画像モード（画像＋ピン2件＋結果リスト、Wi-Fi パスワード伏字を含む） |
+| `scan_ledger_active.png` | スキャン：連続モード作業中（SessionCounter＋台帳リスト＋重複警告。プレビュー部は許可案内で代替） |
+| `ledger_list.png` | 台帳一覧：終了済み1件＋未終了1件 |
+| `ledger_detail.png` | 台帳詳細：読み取り順の行＋重複チップ＋CSV 書き出し |
 | `create_url.png` | 作る：URL 入力済み（ライブプレビュー付き） |
 | `library_empty.png` | 宝箱：0件の空案内 |
 | `library_entries.png` | 宝箱：作成1件＋読取2件（お気に入り・フォルダ・メモあり） |
-| `settings.png` | 設定：初期値＋保存3件 |
+| `settings.png` | 設定：初期値＋保存3件（v0.5.0 で「連続スキャンで重複を警告」が加わった） |
 | `result_short_url.png` | 結果シート：短縮 URL（ホスト確認＋警告バナー） |
 
 - オンボーディングはこのアプリには無い（初回ヒントはカメラ許可後の
@@ -46,6 +49,15 @@ golden は `app/src/test/screenshots/`。
   「インカメに切り替えて、ピンをコードの真上に置けるか」）。
   ツールバーの「切替」ボタンの描画自体は scan_permission /
   scan_image_mode の golden でカバーしている。
+- v0.5.0 の Phase 2（連続スキャン／台帳）：台帳の純粋ロジック
+  （重複判定・CSV・JSON 往復）は LedgerTest でカバーし、画面は
+  golden 3枚（scan_ledger_active／ledger_list／ledger_detail）を
+  追加した。ただし**連続読みの実速度と振動フィードバックの体感は
+  JVM では確かめられない**：実カメラでの出現判定の追随、大量件数
+  でのリストの滑らかさ、新規1回／重複2連の振動の区別、受付・棚卸し
+  の実場面での一連の流れ（開始→連続読み→取り消し→終了→CSV を
+  表計算で開く）は**実機未確認**。受け入れテスト T-08（30件連続＋
+  重複1件警告＋CSV 文字化けなし）も実機項目として残る。
 
 ## 実行方法
 
@@ -113,6 +125,26 @@ golden は `app/src/test/screenshots/`。
   あわせて修飾子 `-night` でダーク配色に固定し golden を安定させる。
 
 ## 直近の実行結果
+
+2026-11-27 v0.5.0（Phase 2：連続スキャン台帳モード＋CSV）：
+
+- `./run-tests.sh record` → `./run-tests.sh`（verify）：**全91件合格**
+  （従来79件＋LedgerTest 9件＋スクショ新規3件）。golden は新規
+  `scan_ledger_active.png`／`ledger_list.png`／`ledger_detail.png` を
+  登録し、`scan_permission.png`（モード帯の追加）と `settings.png`
+  （新トグル「連続スキャンで重複を警告」の追加）を再記録。全枚を
+  目視確認し、崩れ・はみ出しなし。台帳詳細では重複チップが
+  重複ペアの両行に出ること、台帳一覧では未終了チップが出ることを確認。
+- 注意：この回、他チャットのビルドが同じプロジェクトで並行実行され、
+  ビルド出力（テストクラス・golden）が巻き戻る干渉が起きた。単独で
+  再実行した record／verify はどちらも全件合格。並行実行時は
+  `./run-tests.sh` の結果を信用せず、単独で再確認すること。
+- リリースビルド成功（`-x lintVitalAnalyzeRelease`、既知の環境要因）。
+  apksigner 検証済み（証明書 SHA-256 76a232cb…、v0.4.x と同一鍵で
+  上書き可）。aapt で versionCode 13／versionName 0.5.0／INTERNET
+  権限なしを確認。実機未確認の範囲は PHASE2_2026-11-27.md と
+  MVP_SPEC §12 の注記どおり（連続読みの実速度・振動の体感・
+  受け入れテスト T-08）。
 
 2026-11-24 v0.4.2（自動保存オンデテクト＋結果リスト拡大）：
 

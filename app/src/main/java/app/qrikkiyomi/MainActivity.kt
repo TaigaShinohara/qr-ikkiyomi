@@ -42,9 +42,14 @@ import androidx.compose.ui.window.Dialog
 import app.qrikkiyomi.core.CodeClassifier
 import app.qrikkiyomi.core.CreateType
 import app.qrikkiyomi.core.Entry
+import app.qrikkiyomi.core.LedgerAddOutcome
+import app.qrikkiyomi.core.LedgerEntry
+import app.qrikkiyomi.core.LedgerSession
 import app.qrikkiyomi.core.Origin
 import app.qrikkiyomi.core.Store
+import app.qrikkiyomi.core.defaultLedgerName
 import app.qrikkiyomi.core.pruneAgedScans
+import app.qrikkiyomi.core.withScan
 import app.qrikkiyomi.ui.CreateScreen
 import app.qrikkiyomi.ui.CreateState
 import app.qrikkiyomi.ui.LibraryScreen
@@ -162,6 +167,22 @@ class MainActivity : ComponentActivity() {
                         if (kept.size != loaded.size) store.saveAll(kept)
                     }
                 }
+                // Phase 2 (v0.5.0): the ledger book. Sessions persist
+                // on EVERY change (each scan included) — an app that
+                // dies mid-shift must lose nothing, and an unfinished
+                // session simply waits in the list (§2.3 record).
+                val ledgers = remember {
+                    mutableStateListOf<LedgerSession>().apply { addAll(store.loadLedgers()) }
+                }
+                var warnDuplicate by remember { mutableStateOf(store.warnOnLedgerDuplicate) }
+
+                fun persistLedgers() { store.saveLedgers(ledgers.toList()) }
+                fun replaceLedger(session: LedgerSession) {
+                    val idx = ledgers.indexOfFirst { it.id == session.id }
+                    if (idx >= 0) ledgers[idx] = session
+                    persistLedgers()
+                }
+
                 var autoSave by remember { mutableStateOf(store.autoSaveHistory) }
                 var autoSaveOnDetect by remember { mutableStateOf(store.autoSaveOnDetect) }
                 var vibrate by remember { mutableStateOf(store.vibrateOnDetect) }
@@ -302,6 +323,65 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onScanned = { e -> saveScanned(e) },
                                 onSaveEntries = { list -> list.count { saveScanned(it) } },
+                                ledgers = ledgers.toList(),
+                                activeSession = ledgers.firstOrNull {
+                                    it.id == scanState.activeSessionId
+                                },
+                                warnOnLedgerDuplicate = warnDuplicate,
+                                onLedgerStart = {
+                                    val now = System.currentTimeMillis()
+                                    val session = LedgerSession(
+                                        name = defaultLedgerName(now),
+                                        startedAt = now,
+                                    )
+                                    ledgers.add(0, session)
+                                    persistLedgers()
+                                    session.id
+                                },
+                                onLedgerAdd = { sessionId, entry ->
+                                    val session = ledgers.firstOrNull { it.id == sessionId }
+                                    if (session == null) {
+                                        LedgerAddOutcome.ADDED
+                                    } else {
+                                        val (updated, outcome) = session.withScan(entry)
+                                        replaceLedger(updated)
+                                        outcome
+                                    }
+                                },
+                                onLedgerUndoLast = { sessionId ->
+                                    ledgers.firstOrNull { it.id == sessionId }?.let { s ->
+                                        if (s.entries.isNotEmpty()) {
+                                            replaceLedger(
+                                                s.copy(entries = s.entries.dropLast(1))
+                                            )
+                                        }
+                                    }
+                                },
+                                onLedgerDeleteEntry = { sessionId, entryId ->
+                                    ledgers.firstOrNull { it.id == sessionId }?.let { s ->
+                                        replaceLedger(
+                                            s.copy(entries = s.entries.filterNot { it.id == entryId })
+                                        )
+                                    }
+                                },
+                                onLedgerEnd = { sessionId ->
+                                    ledgers.firstOrNull { it.id == sessionId }?.let { s ->
+                                        if (s.isOpen) {
+                                            replaceLedger(
+                                                s.copy(endedAt = System.currentTimeMillis())
+                                            )
+                                        }
+                                    }
+                                },
+                                onLedgerRename = { sessionId, name ->
+                                    ledgers.firstOrNull { it.id == sessionId }?.let { s ->
+                                        replaceLedger(s.copy(name = name))
+                                    }
+                                },
+                                onLedgerDelete = { sessionId ->
+                                    ledgers.removeAll { it.id == sessionId }
+                                    persistLedgers()
+                                },
                                 onMakeQrFromText = { text ->
                                     if (requestDraft(PendingDraft.TextDraft(text))) tab = 1
                                 },
@@ -342,6 +422,11 @@ class MainActivity : ComponentActivity() {
                                 onToggleVibrate = { v ->
                                     vibrate = v
                                     store.vibrateOnDetect = v
+                                },
+                                warnOnLedgerDuplicate = warnDuplicate,
+                                onToggleWarnOnLedgerDuplicate = { v ->
+                                    warnDuplicate = v
+                                    store.warnOnLedgerDuplicate = v
                                 },
                                 autoDeleteDays = autoDeleteDays,
                                 onSetAutoDeleteDays = { v ->
