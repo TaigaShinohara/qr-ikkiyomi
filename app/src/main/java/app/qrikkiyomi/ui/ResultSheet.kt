@@ -19,8 +19,15 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Business
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -205,8 +212,15 @@ fun ResultContent(
             // connection this app makes itself; say so before the tap.
             // v0.4.3 (MINIMAL N-6): trimmed to the two facts — a request
             // is sent, the system's approval is what connects.
+            // v0.5.2 (MINIMAL round 4, C4-2): the first fact is now a
+            // re-display — the button itself is labelled 接続リクエスト
+            // を送る — so the note keeps only the delta (the connection
+            // happens after the system's approval, not at the tap).
+            // Where the approval appears （通知またはダイアログ） is
+            // spelled out by the post-tap toast, at the moment it is
+            // actually on its way.
             Text(
-                "このボタンは端末へ接続リクエストを送るだけです。システムの通知またはダイアログで承認すると接続されます。",
+                "接続は、システムの承認後に行われます。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -223,10 +237,16 @@ fun ResultContent(
             val cUrl = CodeClassifier.contactField(rawValue, "URL")
             if (cName != null || cTel != null || cEmail != null || cOrg != null || cUrl != null) {
                 Spacer(Modifier.height(6.dp))
-                if (cTel != null) Text("電話: $cTel")
-                if (cEmail != null) Text("メール: $cEmail")
-                if (cOrg != null) Text("所属: $cOrg")
-                if (cUrl != null) Text("URL: $cUrl")
+                // v0.5.2 (MINIMAL round 4, R4-3): the field names are
+                // the kind icons the app already uses (Call / Email /
+                // Business / Link — the same vocabulary as TypeChip),
+                // so the rows are glyph + value. Each glyph carries
+                // its field name as contentDescription, so TalkBack
+                // still hears 電話／メール／所属／URL before the value.
+                if (cTel != null) ContactFieldRow(Icons.Filled.Call, "電話", cTel)
+                if (cEmail != null) ContactFieldRow(Icons.Filled.Email, "メール", cEmail)
+                if (cOrg != null) ContactFieldRow(Icons.Filled.Business, "所属", cOrg)
+                if (cUrl != null) ContactFieldRow(Icons.Filled.Link, "URL", cUrl)
             }
         }
 
@@ -442,6 +462,29 @@ fun ResultContent(
                 SecondaryActionButton("QRにする", onClick = { onMakeQrFromText(rawValue) })
             }
         }
+    }
+}
+
+/**
+ * v0.5.2 (MINIMAL round 4, R4-3): one contact field — a kind glyph
+ * and the value. The glyph's contentDescription is the field name,
+ * so the row announces exactly what the old "電話: …" text said.
+ */
+@Composable
+private fun ContactFieldRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    fieldName: String,
+    value: String,
+) {
+    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+        Icon(
+            icon,
+            contentDescription = fieldName,
+            modifier = Modifier.size(18.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.size(8.dp))
+        Text(value)
     }
 }
 

@@ -264,7 +264,12 @@ fun LibraryScreen(
                     // screenful — re-showing a code from history (T-07)
                     // must not require scrolling past the whole payload.
                     Column(modifier = Modifier.padding(horizontal = QrSpacing.gutter)) {
-                        Text("同じQRを表示", style = MaterialTheme.typography.labelLarge)
+                        // v0.5.2 (MINIMAL round 4, R4-5): no "同じQRを
+                        // 表示" heading — the QR itself is the content
+                        // (the real thing outranks a caption naming it),
+                        // and the ResultContent directly below says
+                        // what the code holds. The preview keeps its
+                        // "QRコード" contentDescription.
                         QrPreview(payload = sel.rawValue, modifier = Modifier.fillMaxWidth(), sizeDp = 140)
                     }
                     Spacer(Modifier.height(8.dp))

@@ -53,9 +53,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cameraswitch
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FlashlightOff
 import androidx.compose.material.icons.filled.FlashlightOn
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -915,8 +917,16 @@ fun ScanScreen(
                     shape = RoundedCornerShape(999.dp),
                     modifier = Modifier.align(Alignment.TopEnd).padding(12.dp),
                 ) {
-                    TextButton(onClick = { exitImageMode() }) {
-                        Text("カメラに戻る")
+                    // v0.5.2 (MINIMAL round 4, R4-2): the way back to
+                    // the camera is the standard close glyph — the
+                    // visible words are gone, the spoken name keeps
+                    // the full instruction for TalkBack.
+                    IconButton(onClick = { exitImageMode() }) {
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = "カメラに戻る",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                        )
                     }
                 }
             } else if (hasPermission) {
@@ -1386,6 +1396,16 @@ fun ScanScreen(
         // v0.3.0: flat surface (no tonal lift) separated by one hairline,
         // both side tools get the same width and a small label, and the
         // slider takes the theme colours instead of stock Material.
+        // v0.5.2 (MINIMAL round 4, R4-1): the visible labels under the
+        // three icon tools are gone, and the slider's "ズーム" word is
+        // a ZoomIn glyph beside the track. All four glyphs are the
+        // platform's fixed-meaning camera icons (flashlight, magnifier,
+        // photo library, camera switch) — the same set every camera
+        // app shows unlabelled — and each control keeps its spoken
+        // name (ライト／ズーム／画像から読む／カメラ切替) as its
+        // contentDescription, so nothing non-visual was removed. The
+        // toolbar also gets shorter, which returns height to the
+        // preview and the result list.
         // R2-7: with no live camera (no permission, image mode, failed
         // start) the torch and zoom are disabled rather than decorative.
         val cameraLive = hasPermission && !imageModeActive && !cameraFailed
@@ -1399,9 +1419,9 @@ fun ScanScreen(
                         .padding(horizontal = 12.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
+                    Box(
                         modifier = Modifier.width(52.dp),
+                        contentAlignment = Alignment.Center,
                     ) {
                         IconButton(
                             onClick = {
@@ -1416,8 +1436,10 @@ fun ScanScreen(
                         ) {
                             Icon(
                                 imageVector = if (state.torchOn) Icons.Filled.FlashlightOn else Icons.Filled.FlashlightOff,
-                                // v0.4.6 (BEGINNER): the spoken name
-                                // matches the visible label below it.
+                                // v0.4.6 (BEGINNER): the spoken name is
+                                // the control's name. v0.5.2: it no
+                                // longer has a visible twin (R4-1) and
+                                // remains the name TalkBack uses.
                                 contentDescription = "ライト",
                                 tint = if (state.torchOn) {
                                     MaterialTheme.colorScheme.primary
@@ -1426,18 +1448,18 @@ fun ScanScreen(
                                 },
                             )
                         }
-                        Text(
-                            "ライト",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
                     }
-                    Column(modifier = Modifier.weight(1f).padding(horizontal = 8.dp)) {
-                        Text(
-                            "ズーム",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    Row(
+                        modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Filled.ZoomIn,
+                            contentDescription = "ズーム",
+                            modifier = Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        Spacer(Modifier.width(4.dp))
                         Slider(
                             value = state.zoom,
                             // v0.4.5: the slider spans the bound
@@ -1447,6 +1469,7 @@ fun ScanScreen(
                             onValueChange = { applyZoom(it) },
                             valueRange = state.zoomMin..state.zoomMax,
                             enabled = cameraLive,
+                            modifier = Modifier.weight(1f),
                             colors = SliderDefaults.colors(
                                 thumbColor = MaterialTheme.colorScheme.primary,
                                 activeTrackColor = MaterialTheme.colorScheme.primary,
@@ -1454,9 +1477,9 @@ fun ScanScreen(
                             ),
                         )
                     }
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
+                    Box(
                         modifier = Modifier.width(52.dp),
+                        contentAlignment = Alignment.Center,
                     ) {
                         IconButton(
                             onClick = { imagePicker.launch("image/*") },
@@ -1472,21 +1495,18 @@ fun ScanScreen(
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        Text(
-                            "画像",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
                     }
                     // v0.4.7: back ⇄ front, in the toolbar's own
-                    // idiom (icon over a short label, same 52dp
-                    // column). Disabled under the same conditions as
-                    // the torch and zoom (cameraLive): no permission,
+                    // idiom (same 52dp slot as the other tools).
+                    // Disabled under the same conditions as the
+                    // torch and zoom (cameraLive): no permission,
                     // image mode, or a failed start — a switch offered
                     // while no camera is live would be decorative.
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
+                    // v0.5.2: icon only, like the rest of the toolbar
+                    // (R4-1); the spoken name below is unchanged.
+                    Box(
                         modifier = Modifier.width(52.dp),
+                        contentAlignment = Alignment.Center,
                     ) {
                         IconButton(
                             onClick = { switchCamera() },
@@ -1501,11 +1521,6 @@ fun ScanScreen(
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        Text(
-                            "切替",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
                     }
                 }
                 if (state.fromImageNote != null) {

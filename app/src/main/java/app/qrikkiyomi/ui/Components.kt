@@ -44,6 +44,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.qrikkiyomi.core.CodeClassifier
@@ -309,10 +311,23 @@ fun FolderChipRow(
     ) {
         FilterChip(selected = selected == null, onClick = { onSelect(null) }, label = { Text("すべて") })
         if (hasFavorites) {
+            // v0.5.2 (MINIMAL round 4, R4-4): the favourites filter is
+            // the star glyph alone — the star is this app's fixed sign
+            // for お気に入り (the rows' toggle, in the favourite
+            // colour), so the word added nothing next to it. The chip
+            // keeps お気に入り as its contentDescription, so TalkBack
+            // hears the same name the text used to show.
             FilterChip(
                 selected = selected == FAVORITES,
                 onClick = { onSelect(FAVORITES) },
-                label = { Text("お気に入り") },
+                label = {
+                    Icon(
+                        Icons.Filled.Star,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                },
+                modifier = Modifier.semantics { contentDescription = "お気に入り" },
             )
         }
         folders.forEach { f ->

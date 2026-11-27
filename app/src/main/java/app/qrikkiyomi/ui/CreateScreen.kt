@@ -312,6 +312,10 @@ fun CreateScreen(
                 Text("作る種類", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 // v0.3.0: paste is a supporting action, not a peer of the
                 // section title — a quiet text button with an icon, no box.
+                // v0.5.2 (MINIMAL round 4, C4-1): the label is just
+                // 貼り付け — the paste glyph carries the source (the
+                // clipboard is the only thing one pastes from), and the
+                // empty-clipboard toast still names it in full.
                 TextButton(onClick = { pasteFromClipboard() }) {
                     Icon(
                         Icons.Filled.ContentPaste,
@@ -319,7 +323,7 @@ fun CreateScreen(
                         modifier = Modifier.size(18.dp),
                     )
                     Spacer(Modifier.size(4.dp))
-                    Text("クリップボードから貼り付け")
+                    Text("貼り付け")
                 }
             }
             Spacer(Modifier.height(8.dp))
@@ -369,8 +373,12 @@ fun CreateScreen(
                 // v0.4.3 (MINIMAL N-9): one sentence only — the second
                 // sentence (Google Maps URLs belong to the URL type) was
                 // about a different form and read as noise here.
+                // v0.5.2 (MINIMAL round 4, C4-3): the "ヒント：" prefix
+                // is gone — the small variant-coloured type under the
+                // fields already marks the line as a side note; the
+                // sentence itself is unchanged.
                 Text(
-                    "ヒント：地図アプリで場所を共有→このアプリを選ぶと、緯度経度が自動で入ります。",
+                    "地図アプリで場所を共有→このアプリを選ぶと、緯度経度が自動で入ります。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp),
@@ -481,7 +489,11 @@ fun CreateScreen(
                     }
                 }
                 Text(
-                    "印刷物に貼るときは余白を広めにすると読み取りやすくなります。",
+                    // v0.5.2 (MINIMAL round 4, C4-4): same advice, the
+                    // conditional clause compressed — the fold's reader
+                    // is choosing a margin for print, so the sentence
+                    // starts at the print material itself.
+                    "印刷物には、余白を広めにすると読み取りやすくなります。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
