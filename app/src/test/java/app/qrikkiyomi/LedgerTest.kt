@@ -6,6 +6,7 @@ import app.qrikkiyomi.core.LedgerCsv
 import app.qrikkiyomi.core.LedgerEntry
 import app.qrikkiyomi.core.LedgerSession
 import app.qrikkiyomi.core.defaultLedgerName
+import app.qrikkiyomi.core.hasDefaultName
 import app.qrikkiyomi.core.ledgerSessionFromJson
 import app.qrikkiyomi.core.toJson
 import app.qrikkiyomi.core.withScan
@@ -131,5 +132,20 @@ class LedgerTest {
         val name = defaultLedgerName(1_798_000_000_000L)
         assertTrue(name.endsWith(" の台帳"))
         assertTrue(name.contains(":"))
+    }
+
+    @Test
+    fun hasDefaultName_trueOnlyWhileTheAutomaticNameIsKept() {
+        // v0.5.1 (MINIMAL round 3, N3-3): the list/detail meta lines
+        // drop their "開始" segment only for sessions whose name still
+        // IS the start timestamp.
+        val auto = LedgerSession(
+            id = "s2",
+            name = defaultLedgerName(t0),
+            startedAt = t0,
+        )
+        assertTrue(auto.hasDefaultName())
+        assertFalse(session().hasDefaultName())
+        assertFalse(auto.copy(name = defaultLedgerName(t0 + 60_000L)).hasDefaultName())
     }
 }

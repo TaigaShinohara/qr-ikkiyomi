@@ -94,6 +94,15 @@ fun LedgerSession.withScan(entry: LedgerEntry): Pair<LedgerSession, LedgerAddOut
 fun defaultLedgerName(startedAt: Long): String =
     SimpleDateFormat("M/d HH:mm", Locale.JAPAN).format(Date(startedAt)) + " の台帳"
 
+/**
+ * v0.5.1 (MINIMAL round 3, N3-3): while a session still carries its
+ * automatic name, the name itself IS the start timestamp — meta lines
+ * that also print "M/d HH:mm 開始" would say the same fact twice.
+ * Views use this to drop the start segment for default-named sessions
+ * only; a renamed session keeps the full meta line.
+ */
+fun LedgerSession.hasDefaultName(): Boolean = name == defaultLedgerName(startedAt)
+
 // ---- JSON persistence (same flat shape discipline as Store's Entry) ----
 
 fun LedgerEntry.toJson(): JSONObject = JSONObject().apply {

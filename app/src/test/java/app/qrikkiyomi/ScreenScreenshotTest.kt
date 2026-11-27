@@ -195,10 +195,13 @@ class ScreenScreenshotTest {
 
     /**
      * Phase 2 (v0.5.0): continuous mode mid-session — the counter
-     * (3件・直近・重複警告）, the desk actions, and the ledger rows
-     * newest-first with the duplicate pair marked. The preview area
-     * shows the permission rationale because Robolectric has no
-     * camera permission; on a device it is the live preview.
+     * (3件・重複警告）, the desk actions, and the ledger rows
+     * newest-first with the duplicate pair marked. (v0.5.1 MINIMAL
+     * round 3: the counter's 直近 copy and 一時停止中 chip are gone —
+     * the top ledger row and the pause button's label carry them.)
+     * The preview area shows the permission rationale because
+     * Robolectric has no camera permission; on a device it is the
+     * live preview.
      */
     @Test
     fun scan_ledgerActive() {

@@ -104,14 +104,12 @@ fun SettingsScreen(
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
                 // Phase 2 (§2.3): the duplicate warning is spec'd as
-                // optional — this is its switch. The description keeps
-                // only what the warning does that the label cannot say.
+                // optional — this is its switch.
+                // v0.5.1 (MINIMAL round 3, N3-4): no description — as
+                // with 検出時に振動 (round 1, T4), the label is the
+                // whole fact; the old line only restated it with the
+                // delivery channels spelled out.
                 Text("連続スキャンで重複を警告", style = MaterialTheme.typography.bodyLarge)
-                Text(
-                    "台帳に読み済みのコードを、振動と表示で知らせます",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
             Switch(checked = warnOnLedgerDuplicate, onCheckedChange = onToggleWarnOnLedgerDuplicate)
         }

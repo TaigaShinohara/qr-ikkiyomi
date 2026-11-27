@@ -1786,8 +1786,10 @@ private fun DetectionPin(
 /**
  * Catalog: SessionCounter — the continuous mode's home base, fixed
  * under the toolbar (UI_CATALOG: 表示位置は下部固定）. The count is
- * the hero; below it, the most recent read, so the operator can work
- * eyes-up and only glance to confirm. The duplicate warning appears
+ * the hero, so the operator can work eyes-up and only glance to
+ * confirm (the most recent read itself is the ledger list's top row,
+ * directly below — v0.5.1 MINIMAL round 3 removed the counter's own
+ * copy of it). The duplicate warning appears
  * only when the last read was one (§2.3) — quiet normally, loud only
  * then (ART_DIRECTION §2). The three desk actions are all secondary
  * buttons: while the mode runs, the recommended action is "keep
@@ -1803,7 +1805,6 @@ private fun SessionCounter(
     onEnd: () -> Unit,
 ) {
     val count = session?.entries?.size ?: 0
-    val last = session?.entries?.lastOrNull()
     Surface(color = MaterialTheme.colorScheme.surface) {
         Column(modifier = Modifier.fillMaxWidth()) {
             androidx.compose.material3.HorizontalDivider(
@@ -1813,36 +1814,27 @@ private fun SessionCounter(
                 modifier = Modifier.fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "${count}件",
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.semantics {
-                            liveRegion = LiveRegionMode.Polite
-                            contentDescription = "台帳の件数 ${count}件"
-                        },
-                    )
-                    if (paused) {
-                        Spacer(Modifier.width(10.dp))
-                        MiniChip("一時停止中")
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Text(
-                        if (last == null) {
-                            "まだ読んでいません"
-                        } else {
-                            "直近: " + CodeClassifier.summary(last.rawValue, last.kind)
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
+                // v0.5.1 (MINIMAL round 3, N3-1/N3-2): the count stands
+                // alone here. The "直近: …" line repeated the ledger
+                // list's top row (which carries the same summary plus
+                // kind, time and the duplicate marker), and the
+                // 一時停止中 chip repeated the pause button's own label
+                // (再開する while paused). Both were same-screen
+                // re-displays; the list top row and the button are the
+                // canonical homes. The paused state stays announced
+                // through the button label.
+                Text(
+                    "${count}件",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.semantics {
+                        liveRegion = LiveRegionMode.Polite
+                        contentDescription = "台帳の件数 ${count}件"
+                    },
+                )
                 if (duplicateWarning) {
                     Spacer(Modifier.height(6.dp))
-                    WarningBanner("重複しています — このコードはこの台帳で読み済みです")
+                    WarningBanner("重複しています — この台帳で読み済みです")
                 }
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import app.qrikkiyomi.core.CodeClassifier
 import app.qrikkiyomi.core.LedgerCsv
+import app.qrikkiyomi.core.hasDefaultName
 import app.qrikkiyomi.core.LedgerEntry
 import app.qrikkiyomi.core.LedgerSession
 import app.qrikkiyomi.core.QrFactory
@@ -89,7 +90,15 @@ fun LedgerSessionRow(session: LedgerSession, onClick: () -> Unit) {
                 }
             }
             Text(
-                "${QrFactory.formatTimestamp(session.startedAt)} 開始 ・ ${session.entries.size}件",
+                // v0.5.1 (MINIMAL round 3, N3-3): a default-named
+                // session's name already IS the start time, so the
+                // sub-line keeps only the count; renamed sessions keep
+                // the full "開始" segment.
+                if (session.hasDefaultName()) {
+                    "${session.entries.size}件"
+                } else {
+                    "${QrFactory.formatTimestamp(session.startedAt)} 開始 ・ ${session.entries.size}件"
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -240,9 +249,18 @@ fun LedgerDetailView(
         )
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
             Text(
-                "${QrFactory.formatTimestamp(session.startedAt)} 開始" +
-                    (session.endedAt?.let { " 〜 ${QrFactory.formatTimestamp(it)} 終了" } ?: " ・ 未終了") +
-                    " ・ ${session.entries.size}件",
+                // v0.5.1 (MINIMAL round 3, N3-3): same rule as the list
+                // row — for a default-named session the title already
+                // carries the start time, so the meta line starts from
+                // the end / open state instead of repeating it.
+                if (session.hasDefaultName()) {
+                    (session.endedAt?.let { "${QrFactory.formatTimestamp(it)} 終了" } ?: "未終了") +
+                        " ・ ${session.entries.size}件"
+                } else {
+                    "${QrFactory.formatTimestamp(session.startedAt)} 開始" +
+                        (session.endedAt?.let { " 〜 ${QrFactory.formatTimestamp(it)} 終了" } ?: " ・ 未終了") +
+                        " ・ ${session.entries.size}件"
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
